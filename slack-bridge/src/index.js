@@ -23,7 +23,7 @@ const DEFAULT_CWD = process.env.KIRO_DEFAULT_CWD || process.cwd();
 const DEFAULT_AGENT = process.env.KIRO_AGENT || 'main';
 const DEFAULT_MODEL = process.env.KIRO_MODEL || null;
 const TIMEOUT_MS = Number.isFinite(parseInt(process.env.KIRO_TIMEOUT_MS, 10))
-  ? parseInt(process.env.KIRO_TIMEOUT_MS, 10) : 300000; // 0 = no timeout
+  ? parseInt(process.env.KIRO_TIMEOUT_MS, 10) : 0; // 0 = no timeout (default)
 // Output longer than this (chars) is uploaded as a Slack file snippet instead of
 // being split into multiple numbered messages. Default = one Slack message worth.
 const SNIPPET_THRESHOLD = Number.isFinite(parseInt(process.env.KIRO_SNIPPET_THRESHOLD, 10))
