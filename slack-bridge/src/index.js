@@ -12,6 +12,7 @@ const { App } = require('@slack/bolt');
 const { runKiro, listSessions, listAgents } = require('./kiro');
 const store = require('./sessions');
 const { chunk } = require('./chunk');
+const { formatForSlack } = require('./format');
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const RAW_ALLOWED = (process.env.SLACK_ALLOWED_USER_IDS || '').trim();
@@ -86,7 +87,7 @@ function helpText() {
     '*Override at start*',
     '`!new [agent=<name>] [dir=<path|workspace>] [model=<name>] <task>`',
     '',
-    '*In a thread*   `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!end`',
+    '*In a thread*   `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!clear` · `!end`',
     '*Anywhere*   `!help` · `!agents`',
     '',
     '*Status*   :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
@@ -123,7 +124,7 @@ async function sayThread(say, thread_ts, text) {
 // Send Kiro output to the thread: inline (chunked) if small, else as a file snippet.
 async function sendOutput({ client, say, channel, thread_ts, text }) {
   const body = text && text.trim() ? text : '(no output)';
-  if (body.length <= SNIPPET_THRESHOLD) return sayThread(say, thread_ts, body);
+  if (body.length <= SNIPPET_THRESHOLD) return sayThread(say, thread_ts, formatForSlack(body));
   try {
     await client.files.uploadV2({
       channel_id: channel,
@@ -131,10 +132,10 @@ async function sendOutput({ client, say, channel, thread_ts, text }) {
       filename: 'kiro-response.md',
       title: 'Kiro output',
       initial_comment: `📄 Long output (${body.length.toLocaleString()} chars) — attached:`,
-      content: body,
+      content: body, // keep raw Markdown in the downloadable file
     });
   } catch (e) {
-    await sayThread(say, thread_ts, body); // fallback to inline if upload fails
+    await sayThread(say, thread_ts, formatForSlack(body)); // fallback to inline if upload fails
   }
 }
 
@@ -160,10 +161,12 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   }
   const st = store.get(threadKey);
   const isFresh = !st.sessionId;
+  console.log(`[turn] ${threadKey} fresh=${isFresh} dir=${st.cwd} agent=${st.agent || 'default'} promptLen=${prompt.length}`);
 
-  // Session header card (first turn only) — gives the thread instant context.
-  if (isFresh) {
+  // Session header card — shown once per session (not repeated on the first prompt).
+  if (isFresh && !st.announced) {
     await say({ thread_ts, text: `:thread: *New session* · dir \`${st.cwd}\` · agent \`${st.agent || 'default'}\`${st.model ? ` · model \`${st.model}\`` : ''}` });
+    store.set(threadKey, { announced: true });
   }
 
   // Status via reaction; fall back to a text note if reactions aren't permitted.
@@ -198,6 +201,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
     await unreact(client, channel, reactTs, 'hourglass_flowing_sand');
     await react(client, channel, reactTs, res.ok ? 'white_check_mark' : 'x');
   }
+  console.log(`[turn done] ${threadKey} ok=${res.ok} code=${res.code} outLen=${(res.output || '').length} err=${(res.error || '').slice(0, 120)}`);
 
   if (!res.ok && !res.output) {
     return sayThread(say, thread_ts, `⚠️ ${res.error || `Kiro exited with code ${res.code}.`}`);
@@ -215,11 +219,12 @@ async function startSession({ threadKey, rootTs, reactTs, channel, patch, prompt
   });
   if (prompt) return runTurn({ threadKey, thread_ts: rootTs, reactTs, channel, prompt, say, client });
   const s = store.get(threadKey);
+  store.set(threadKey, { announced: true });
   return say({ thread_ts: rootTs, text: `:thread: *New session* · dir \`${s.cwd}\` · agent \`${s.agent || 'default'}\`\nReply in this thread to continue.` });
 }
 
 // ── Message handling ────────────────────────────────────────────────────────
-app.message(async ({ message, say, client }) => {
+async function handleMessage({ message, say, client }) {
   if (message.channel_type !== 'im') return;            // DMs only
   if (message.subtype || message.bot_id) return;         // ignore edits/joins/our own
   if (!ALLOW_ALL && !ALLOWED.includes(message.user)) return;
@@ -278,8 +283,12 @@ app.message(async ({ message, say, client }) => {
         case 'done':
           store.remove(threadKey);
           return say({ thread_ts: rootTs, text: '✅ Session closed. Start a new one any time with a top-level message.' });
+        case 'clear':
+        case 'reset':
+          store.set(threadKey, { sessionId: null, announced: false });
+          return say({ thread_ts: rootTs, text: '🧹 Cleared — your next message starts a fresh session in this thread.' });
         default:
-          return say({ thread_ts: rootTs, text: 'In a thread: `!status`, `!abort`, `!model <name>`, `!agent <name>`, `!end`. Anything else is a prompt.' });
+          return say({ thread_ts: rootTs, text: 'In a thread: `!status`, `!abort`, `!model <name>`, `!agent <name>`, `!clear`, `!end`. Anything else is a prompt.' });
       }
     }
     return runTurn({ threadKey, thread_ts: rootTs, reactTs: message.ts, channel, prompt: text, say, client });
@@ -298,6 +307,16 @@ app.message(async ({ message, say, client }) => {
   }
   // Plain message → auto-start a new session (agent: main by default).
   return startSession({ threadKey, rootTs: message.ts, reactTs: message.ts, channel, patch: {}, prompt: text, say, client });
+}
+
+app.message(async (args) => {
+  try {
+    await handleMessage(args);
+  } catch (e) {
+    console.error('[handler error]', e);
+    const { message, say } = args;
+    try { await say({ thread_ts: message.thread_ts || message.ts, text: `⚠️ Something went wrong: ${e.message || e}` }); } catch (_) { /* ignore */ }
+  }
 });
 
 (async () => {

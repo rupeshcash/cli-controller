@@ -15,7 +15,7 @@ function clean(s) {
     .trim();
 }
 
-function buildArgs({ sessionId, agent, model, trustTools, prompt }) {
+function buildArgs({ sessionId, agent, model, trustTools }) {
   const args = ['chat', '--no-interactive'];
   if (sessionId) args.push('--resume-id', sessionId);
   if (agent) args.push('--agent', agent);
@@ -29,8 +29,7 @@ function buildArgs({ sessionId, agent, model, trustTools, prompt }) {
   } else {
     args.push(`--trust-tools=${trustTools || ''}`);
   }
-
-  args.push(prompt); // positional [INPUT] = the question to ask
+  // Prompt is delivered via stdin (see runKiro) — robust for large/multiline text.
   return args;
 }
 
@@ -39,7 +38,7 @@ function runKiro({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs =
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(BIN(), buildArgs({ sessionId, agent, model, trustTools, prompt }), {
+      child = spawn(BIN(), buildArgs({ sessionId, agent, model, trustTools }), {
         cwd: cwd || process.cwd(),
         env: process.env,
       });
@@ -47,6 +46,12 @@ function runKiro({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs =
       return resolve({ ok: false, output: '', error: `Failed to start ${BIN()}: ${e.message}`, code: -1 });
     }
     if (typeof onSpawn === 'function') onSpawn(child);
+
+    // Deliver the prompt via stdin (handles arbitrarily large / multiline text).
+    if (child.stdin) {
+      child.stdin.on('error', () => { /* ignore EPIPE if the process exits early */ });
+      try { child.stdin.write(prompt || ''); child.stdin.end(); } catch (e) { /* ignore */ }
+    }
 
     let out = '';
     let err = '';
