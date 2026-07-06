@@ -1,0 +1,17 @@
+{
+  "name": "kiro-slack-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Control kiro-cli from Slack (Socket Mode). Single-user, headless, safe.",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.2.0",
+    "dotenv": "^16.4.5"
+  }
+}
