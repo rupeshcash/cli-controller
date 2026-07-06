@@ -58,21 +58,36 @@ const running = new Map();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function helpText() {
-  const aliasList = Object.keys(DIR_ALIASES);
+  const aliasNames = Object.keys(DIR_ALIASES);
+  const workspaces = aliasNames.length
+    ? aliasNames.map((a) => `   • \`${a}\` → \`${expandHome(DIR_ALIASES[a])}\``).join('\n')
+    : '   _(none yet — set `KIRO_DIR_ALIASES` in .env)_';
+  const ws = aliasNames.length ? aliasNames[0] : 'myrepo';
   return [
-    '*Kiro Bridge — just chat* :speech_balloon:',
-    '• *Send any message* → new session; I reply in a *thread*.',
-    '• *Reply in that thread* → continues the same session.',
-    '• Each new top-level message = a separate, parallel session.',
-    '• Status shows as reactions: :hourglass_flowing_sand: working → :white_check_mark: done / :x: error.',
+    ':robot_face: *Kiro Bridge* — drive Kiro from Slack',
     '',
-    `*Default agent:* \`${DEFAULT_AGENT}\`  ·  *Default dir:* \`${DEFAULT_CWD}\``,
-    '*Override at start:* `!new [agent=<name>] [dir=<path|alias>] [model=<name>] <task>`',
-    aliasList.length ? `*Dir aliases:* ${aliasList.map((a) => `\`${a}\``).join(', ')} — e.g. \`!new ${aliasList[0]} <task>\`` : '',
+    '*How it works*',
+    '• Send *any message* → I start a session & reply in a :thread: *thread*',
+    '• *Reply in the thread* → the same session continues',
+    '• Each new top-level message → a separate, *parallel* session',
     '',
-    '*Anywhere:* `!help`, `!agents`',
-    '*In a thread:* `!status`, `!abort`, `!model <name>`, `!agent <name>`, `!end`',
-  ].filter(Boolean).join('\n');
+    '*Quick start*',
+    '• `summarize the README here`   ← just type a task',
+    '• `!new ' + ws + ' run the unit tests`   ← start in a saved workspace',
+    '• `!new dir=~/path/to/repo fix the build`',
+    '',
+    `*Defaults*   agent \`${DEFAULT_AGENT}\` · dir \`${DEFAULT_CWD}\``,
+    '*Workspaces*   (use as `!new <name> <task>` or `dir=<name>`)',
+    workspaces,
+    '',
+    '*Override at start*',
+    '`!new [agent=<name>] [dir=<path|workspace>] [model=<name>] <task>`',
+    '',
+    '*In a thread*   `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!end`',
+    '*Anywhere*   `!help` · `!agents`',
+    '',
+    '*Status*   :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
+  ].join('\n');
 }
 
 function parseNew(text) {
