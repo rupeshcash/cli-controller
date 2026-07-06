@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# bridge — one-command control for the Kiro Slack bridge.
+# Usage:  ./bridge start | stop | restart | status | logs
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PIDFILE="$DIR/bridge.pid"
+LOGFILE="$DIR/bridge.log"
+
+is_running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+case "${1:-status}" in
+  start)
+    if is_running; then echo "Already running (pid $(cat "$PIDFILE"))."; exit 0; fi
+    cd "$DIR"
+    nohup bash run.sh > "$LOGFILE" 2>&1 &
+    echo $! > "$PIDFILE"
+    sleep 3
+    if is_running; then echo "⚡ Started (pid $(cat "$PIDFILE"))."; else echo "Failed — check $LOGFILE"; exit 1; fi
+    ;;
+  stop)
+    if ! is_running; then echo "Not running."; exit 0; fi
+    kill "$(cat "$PIDFILE")" 2>/dev/null
+    rm -f "$PIDFILE"
+    echo "🛑 Stopped."
+    ;;
+  restart)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+  status)
+    if is_running; then
+      echo "⚡ Running (pid $(cat "$PIDFILE"))."
+    else
+      echo "Not running."
+    fi
+    ;;
+  logs)
+    tail -f "$LOGFILE"
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status|logs}"
+    exit 1
+    ;;
+esac

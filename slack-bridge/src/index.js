@@ -24,9 +24,10 @@ const DEFAULT_AGENT = process.env.KIRO_AGENT || 'main';
 const DEFAULT_MODEL = process.env.KIRO_MODEL || null;
 const TIMEOUT_MS = Number.isFinite(parseInt(process.env.KIRO_TIMEOUT_MS, 10))
   ? parseInt(process.env.KIRO_TIMEOUT_MS, 10) : 300000; // 0 = no timeout
-// Output longer than this (chars) is uploaded as a Slack file snippet instead of chunked messages.
+// Output longer than this (chars) is uploaded as a Slack file snippet instead of
+// being split into multiple numbered messages. Default = one Slack message worth.
 const SNIPPET_THRESHOLD = Number.isFinite(parseInt(process.env.KIRO_SNIPPET_THRESHOLD, 10))
-  ? parseInt(process.env.KIRO_SNIPPET_THRESHOLD, 10) : 12000;
+  ? parseInt(process.env.KIRO_SNIPPET_THRESHOLD, 10) : 3800;
 
 // Directory aliases: KIRO_DIR_ALIASES="api:~/projects/api,web:~/projects/web"
 const DIR_ALIASES = (process.env.KIRO_DIR_ALIASES || '')
@@ -89,7 +90,7 @@ function helpText() {
     '',
     '*In a thread*   `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!verbose` · `!clear` · `!end`',
     '',
-    '_Replies are *quiet* by default (answer only). Add `-v` to `!new`, or `!verbose` in a thread, to see the full tool trace._',
+    '_Replies are *verbose* by default (full tool trace). Add `-q` to `!new`, or `!verbose` in a thread, to toggle quiet mode (answer only)._',
     '*Anywhere*   `!help` · `!agents`',
     '',
     '*Status*   :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
@@ -100,7 +101,8 @@ function parseNew(text) {
   let rest = text.slice(4).trim(); // after "!new"
   const patch = {};
   const optRe = /^(agent|dir|cwd|model|verbose)\s*=\s*(\S+)\s*/i;
-  const flagRe = /^(?:-v|--verbose)(?:\s+|$)/i;
+  const flagVRe = /^(?:-v|--verbose)(?:\s+|$)/i;
+  const flagQRe = /^(?:-q|--quiet)(?:\s+|$)/i;
   for (;;) {
     let m;
     if ((m = rest.match(optRe))) {
@@ -112,7 +114,8 @@ function parseNew(text) {
       rest = rest.slice(m[0].length);
       continue;
     }
-    if ((m = rest.match(flagRe))) { patch.verbose = true; rest = rest.slice(m[0].length); continue; }
+    if ((m = rest.match(flagVRe))) { patch.verbose = true; rest = rest.slice(m[0].length); continue; }
+    if ((m = rest.match(flagQRe))) { patch.verbose = false; rest = rest.slice(m[0].length); continue; }
     break;
   }
   // Bare first token as a directory: a known alias, or something that looks like a path.
@@ -224,7 +227,7 @@ async function startSession({ threadKey, rootTs, reactTs, channel, patch, prompt
     cwd: patch.cwd || DEFAULT_CWD,
     agent: patch.agent !== undefined ? patch.agent : DEFAULT_AGENT,
     model: patch.model !== undefined ? patch.model : DEFAULT_MODEL,
-    verbose: patch.verbose === true,
+    verbose: patch.verbose !== undefined ? patch.verbose : true,
     sessionId: null,
   });
   if (prompt) return runTurn({ threadKey, thread_ts: rootTs, reactTs, channel, prompt, say, client });
