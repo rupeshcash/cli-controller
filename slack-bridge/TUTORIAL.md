@@ -104,3 +104,10 @@ tail -f cli-controller/slack-bridge/bridge.log          # logs
 kill "$(cat cli-controller/slack-bridge/bridge.pid)"     # stop
 cd cli-controller/slack-bridge && nohup bash run.sh > bridge.log 2>&1 & echo $! > bridge.pid   # start
 ```
+
+## Output, tool activity & context
+
+- **You see what Kiro does.** The bridge forwards Kiro's headless stdout, which includes its **tool activity** — the commands it runs, directories/files it reads, and completion times — followed by the final answer. It reads much like your TUI session (minus the live-redrawing chrome).
+- **Long output → file snippet.** If a response exceeds `KIRO_SNIPPET_THRESHOLD` chars (default 12000), it's uploaded to the thread as a `kiro-response.md` file instead of many chunked messages. Requires the `files:write` scope.
+- **Context size.** `!status` (in a thread) shows `turns` (message count) for the session as a rough size indicator.
+- **The live `◕ NN%` context meter is _not_ available.** That percentage is drawn by Kiro's interactive TUI and is not emitted in headless (`--no-interactive`) output — so it can't be piped to Slack today. Getting the real meter would require running Kiro inside a pseudo-terminal and scraping the TUI status bar (a larger change with reliability tradeoffs). `turns` is the honest proxy for now.

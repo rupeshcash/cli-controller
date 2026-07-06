@@ -23,6 +23,9 @@ const DEFAULT_AGENT = process.env.KIRO_AGENT || 'main';
 const DEFAULT_MODEL = process.env.KIRO_MODEL || null;
 const TIMEOUT_MS = Number.isFinite(parseInt(process.env.KIRO_TIMEOUT_MS, 10))
   ? parseInt(process.env.KIRO_TIMEOUT_MS, 10) : 300000; // 0 = no timeout
+// Output longer than this (chars) is uploaded as a Slack file snippet instead of chunked messages.
+const SNIPPET_THRESHOLD = Number.isFinite(parseInt(process.env.KIRO_SNIPPET_THRESHOLD, 10))
+  ? parseInt(process.env.KIRO_SNIPPET_THRESHOLD, 10) : 12000;
 
 // Directory aliases: KIRO_DIR_ALIASES="api:~/projects/api,web:~/projects/web"
 const DIR_ALIASES = (process.env.KIRO_DIR_ALIASES || '')
@@ -116,6 +119,24 @@ async function sayThread(say, thread_ts, text) {
   for (const part of chunk(text)) await say({ thread_ts, text: part });
 }
 
+// Send Kiro output to the thread: inline (chunked) if small, else as a file snippet.
+async function sendOutput({ client, say, channel, thread_ts, text }) {
+  const body = text && text.trim() ? text : '(no output)';
+  if (body.length <= SNIPPET_THRESHOLD) return sayThread(say, thread_ts, body);
+  try {
+    await client.files.uploadV2({
+      channel_id: channel,
+      thread_ts,
+      filename: 'kiro-response.md',
+      title: 'Kiro output',
+      initial_comment: `📄 Long output (${body.length.toLocaleString()} chars) — attached:`,
+      content: body,
+    });
+  } catch (e) {
+    await sayThread(say, thread_ts, body); // fallback to inline if upload fails
+  }
+}
+
 // Reactions (graceful: no-op if the reactions:write scope isn't granted).
 async function react(client, channel, ts, name) {
   try { await client.reactions.add({ channel, timestamp: ts, name }); return true; }
@@ -180,7 +201,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   if (!res.ok && !res.output) {
     return sayThread(say, thread_ts, `⚠️ ${res.error || `Kiro exited with code ${res.code}.`}`);
   }
-  await sayThread(say, thread_ts, res.output || '(no output)');
+  await sendOutput({ client, say, channel, thread_ts, text: res.output });
   if (!res.ok && res.error) await sayThread(say, thread_ts, `_error:_\n${res.error}`);
 }
 
@@ -235,7 +256,14 @@ app.message(async ({ message, say, client }) => {
         }
         case 'status': {
           const st = store.get(threadKey);
-          return say({ thread_ts: rootTs, text: `*Session*\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
+          let turns = '';
+          if (st.sessionId) {
+            try {
+              const s = (await listSessions(st.cwd)).find((x) => x.sessionId === st.sessionId);
+              if (s) turns = `\n• turns: \`${s.messageCount}\``;
+            } catch (e) { /* ignore */ }
+          }
+          return say({ thread_ts: rootTs, text: `*Session*\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
         }
         case 'model':
           if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!model <name>` (or `!model clear`)' });
