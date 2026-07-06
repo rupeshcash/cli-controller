@@ -18,6 +18,7 @@ function defaults() {
     sessionId: null,
     agent: process.env.KIRO_AGENT || null,
     model: process.env.KIRO_MODEL || null,
+    verbose: false,
   };
 }
 

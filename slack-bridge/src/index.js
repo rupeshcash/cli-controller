@@ -12,7 +12,7 @@ const { App } = require('@slack/bolt');
 const { runKiro, listSessions, listAgents } = require('./kiro');
 const store = require('./sessions');
 const { chunk } = require('./chunk');
-const { formatForSlack } = require('./format');
+const { stripToolTrace, toSlack } = require('./format');
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const RAW_ALLOWED = (process.env.SLACK_ALLOWED_USER_IDS || '').trim();
@@ -87,7 +87,9 @@ function helpText() {
     '*Override at start*',
     '`!new [agent=<name>] [dir=<path|workspace>] [model=<name>] <task>`',
     '',
-    '*In a thread*   `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!clear` · `!end`',
+    '*In a thread*   `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!verbose` · `!clear` · `!end`',
+    '',
+    '_Replies are *quiet* by default (answer only). Add `-v` to `!new`, or `!verbose` in a thread, to see the full tool trace._',
     '*Anywhere*   `!help` · `!agents`',
     '',
     '*Status*   :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
@@ -97,16 +99,21 @@ function helpText() {
 function parseNew(text) {
   let rest = text.slice(4).trim(); // after "!new"
   const patch = {};
-  // Leading options: "key=value", "key = value", "key =value", "key= value" (value = one non-space token).
-  const optRe = /^(agent|dir|cwd|model)\s*=\s*(\S+)\s*/i;
-  let m;
-  while ((m = rest.match(optRe))) {
-    const k = m[1].toLowerCase();
-    const v = m[2];
-    if (k === 'agent') patch.agent = v;
-    else if (k === 'dir' || k === 'cwd') patch.cwd = resolveDir(v);
-    else if (k === 'model') patch.model = v;
-    rest = rest.slice(m[0].length);
+  const optRe = /^(agent|dir|cwd|model|verbose)\s*=\s*(\S+)\s*/i;
+  const flagRe = /^(?:-v|--verbose)(?:\s+|$)/i;
+  for (;;) {
+    let m;
+    if ((m = rest.match(optRe))) {
+      const k = m[1].toLowerCase(); const v = m[2];
+      if (k === 'agent') patch.agent = v;
+      else if (k === 'dir' || k === 'cwd') patch.cwd = resolveDir(v);
+      else if (k === 'model') patch.model = v;
+      else if (k === 'verbose') patch.verbose = /^(true|on|yes|1)$/i.test(v);
+      rest = rest.slice(m[0].length);
+      continue;
+    }
+    if ((m = rest.match(flagRe))) { patch.verbose = true; rest = rest.slice(m[0].length); continue; }
+    break;
   }
   // Bare first token as a directory: a known alias, or something that looks like a path.
   if (patch.cwd === undefined) {
@@ -122,20 +129,22 @@ async function sayThread(say, thread_ts, text) {
 }
 
 // Send Kiro output to the thread: inline (chunked) if small, else as a file snippet.
-async function sendOutput({ client, say, channel, thread_ts, text }) {
-  const body = text && text.trim() ? text : '(no output)';
-  if (body.length <= SNIPPET_THRESHOLD) return sayThread(say, thread_ts, formatForSlack(body));
+async function sendOutput({ client, say, channel, thread_ts, text, verbose }) {
+  const raw = text && text.trim() ? text : '(no output)';
+  const shown = verbose ? raw : stripToolTrace(raw);
+  const finalText = shown && shown.trim() ? shown : raw; // never send empty when there was output
+  if (finalText.length <= SNIPPET_THRESHOLD) return sayThread(say, thread_ts, toSlack(finalText));
   try {
     await client.files.uploadV2({
       channel_id: channel,
       thread_ts,
       filename: 'kiro-response.md',
       title: 'Kiro output',
-      initial_comment: `📄 Long output (${body.length.toLocaleString()} chars) — attached:`,
-      content: body, // keep raw Markdown in the downloadable file
+      initial_comment: `📄 Long output (${finalText.length.toLocaleString()} chars) — attached:`,
+      content: finalText, // raw Markdown in the downloadable file
     });
   } catch (e) {
-    await sayThread(say, thread_ts, formatForSlack(body)); // fallback to inline if upload fails
+    await sayThread(say, thread_ts, toSlack(finalText)); // fallback to inline if upload fails
   }
 }
 
@@ -206,7 +215,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   if (!res.ok && !res.output) {
     return sayThread(say, thread_ts, `⚠️ ${res.error || `Kiro exited with code ${res.code}.`}`);
   }
-  await sendOutput({ client, say, channel, thread_ts, text: res.output });
+  await sendOutput({ client, say, channel, thread_ts, text: res.output, verbose: st.verbose });
   if (!res.ok && res.error) await sayThread(say, thread_ts, `_error:_\n${res.error}`);
 }
 
@@ -215,6 +224,7 @@ async function startSession({ threadKey, rootTs, reactTs, channel, patch, prompt
     cwd: patch.cwd || DEFAULT_CWD,
     agent: patch.agent !== undefined ? patch.agent : DEFAULT_AGENT,
     model: patch.model !== undefined ? patch.model : DEFAULT_MODEL,
+    verbose: patch.verbose === true,
     sessionId: null,
   });
   if (prompt) return runTurn({ threadKey, thread_ts: rootTs, reactTs, channel, prompt, say, client });
@@ -269,7 +279,7 @@ async function handleMessage({ message, say, client }) {
               if (s) turns = `\n• turns: \`${s.messageCount}\``;
             } catch (e) { /* ignore */ }
           }
-          return say({ thread_ts: rootTs, text: `*Session*\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
+          return say({ thread_ts: rootTs, text: `*Session*\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• verbose: \`${st.verbose ? 'on' : 'off'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
         }
         case 'model':
           if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!model <name>` (or `!model clear`)' });
@@ -287,8 +297,14 @@ async function handleMessage({ message, say, client }) {
         case 'reset':
           store.set(threadKey, { sessionId: null, announced: false });
           return say({ thread_ts: rootTs, text: '🧹 Cleared — your next message starts a fresh session in this thread.' });
+        case 'verbose': {
+          const cur = store.get(threadKey).verbose;
+          const on = !arg ? !cur : /^(on|true|yes|1)$/i.test(arg);
+          store.set(threadKey, { verbose: on });
+          return say({ thread_ts: rootTs, text: on ? '🗣️ Verbose ON — full tool trace shown for this session.' : '🤫 Verbose OFF — answers only (default).' });
+        }
         default:
-          return say({ thread_ts: rootTs, text: 'In a thread: `!status`, `!abort`, `!model <name>`, `!agent <name>`, `!clear`, `!end`. Anything else is a prompt.' });
+          return say({ thread_ts: rootTs, text: 'In a thread: `!status`, `!abort`, `!model <name>`, `!agent <name>`, `!verbose`, `!clear`, `!end`. Anything else is a prompt.' });
       }
     }
     return runTurn({ threadKey, thread_ts: rootTs, reactTs: message.ts, channel, prompt: text, say, client });

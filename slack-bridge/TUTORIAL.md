@@ -67,6 +67,7 @@ Example:
 | In a thread | `!agent <name>` | Change agent for the next turn |
 | In a thread | `!end` (or `!done`) | Close the session for that thread |
 | In a thread | `!clear` (or `!reset`) | Start a fresh session in the same thread |
+| In a thread | `!verbose` | Toggle full tool trace on/off for this session |
 
 ## Status reactions
 
@@ -108,8 +109,8 @@ cd cli-controller/slack-bridge && nohup bash run.sh > bridge.log 2>&1 & echo $! 
 
 ## Output, tool activity & context
 
-- **You see what Kiro does.** The bridge forwards Kiro's headless stdout, which includes its **tool activity** — the commands it runs, directories/files it reads, and completion times — followed by the final answer. It reads much like your TUI session (minus the live-redrawing chrome).
-- **Formatted for Slack.** Kiro's Markdown is converted to Slack formatting (headings/`**bold**` → bold, `-` → •, `[text](url)` → links) and tool lines are shown compactly (`🔧` command, `📂` dir, `📄` file, `⏱` time). Code blocks are preserved verbatim.
+- **Quiet by default.** Replies show just Kiro's answer — the tool trace (commands run, files read, raw command output) is hidden so threads stay readable. Add `-v` to `!new` (e.g. `!new -v java-utils <task>`), set `verbose=true`, or send `!verbose` in a thread to see the full activity.
+- **Formatted for Slack.** Output is rendered with the `slackify-markdown` library (Markdown → Slack mrkdwn: `**bold**` → *bold*, headings → bold, `-` → •, `[text](url)` → clickable links). Code blocks are preserved verbatim.
 - **Long output → file snippet.** If a response exceeds `KIRO_SNIPPET_THRESHOLD` chars (default 12000), it's uploaded to the thread as a `kiro-response.md` file instead of many chunked messages. Requires the `files:write` scope.
 - **Context size.** `!status` (in a thread) shows `turns` (message count) for the session as a rough size indicator.
 - **The live `◕ NN%` context meter is _not_ available.** That percentage is drawn by Kiro's interactive TUI and is not emitted in headless (`--no-interactive`) output — so it can't be piped to Slack today. Getting the real meter would require running Kiro inside a pseudo-terminal and scraping the TUI status bar (a larger change with reliability tradeoffs). `turns` is the honest proxy for now.

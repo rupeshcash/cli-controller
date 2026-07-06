@@ -1,59 +1,54 @@
-// src/format.js — make Kiro output read cleanly in Slack.
+// src/format.js — render Kiro output for Slack.
 //
-// Slack uses "mrkdwn", not GitHub-flavored Markdown. Kiro/LLM output is GFM, so
-// without conversion it renders as messy plaintext. This module:
-//   1) converts common Markdown → Slack mrkdwn (bold, headings, bullets, links)
-//   2) prettifies Kiro's tool-activity lines into compact, scannable rows
-// Code blocks and inline code are protected so their contents are never altered.
+// Formatting uses the gold-standard `slackify-markdown` (AST-based Markdown →
+// Slack mrkdwn). The only custom piece is `stripToolTrace`: hiding Kiro's
+// tool-activity lines for "quiet" mode — this is Kiro-specific, so no library
+// exists for it. It is written to NEVER swallow the assistant's answer.
 
-const ZWB = '\u0000B'; // placeholder markers (null byte won't appear in text)
-const ZWI = '\u0000I';
+const { slackifyMarkdown } = require('slackify-markdown');
 
-function mdToMrkdwn(input) {
-  let s = input;
+// Standalone one-line trace markers Kiro prints while working.
+const TOOL_LINE = /^\s*(Reading (?:directory|file)s?:|Searching for files:|I will run the following command:|Purpose:|Using tool:|✓\s|-\s*Completed in\b|Creating file|Writing to file|Updating file|Editing file)/i;
+const TOOL_START = /\(using tool:/i;               // start of a tool invocation
+const TOOL_END = /(-\s*Completed in\b|^\s*✓\s+Successfully)/i; // its completion
 
-  // Protect fenced code blocks, then inline code.
-  const blocks = [];
-  s = s.replace(/```[\s\S]*?```/g, (m) => { blocks.push(m); return `${ZWB}${blocks.length - 1}\u0000`; });
-  const inline = [];
-  s = s.replace(/`[^`\n]+`/g, (m) => { inline.push(m); return `${ZWI}${inline.length - 1}\u0000`; });
-
-  // Links: [text](url) -> <url|text>
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<$2|$1>');
-  // Bold: **x** / __x__ -> *x*
-  s = s.replace(/\*\*([^*\n]+)\*\*/g, '*$1*');
-  s = s.replace(/(^|[^_])__([^_\n]+)__(?!_)/g, '$1*$2*');
-  // Headings: leading #'s -> bold line
-  s = s.replace(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/gm, '*$1*');
-  // Bullets: "- ", "* ", "+ " at line start -> "• " (requires the trailing space,
-  // so it won't touch things like "-rw-r--r--" in command output)
-  s = s.replace(/^(\s*)[-*+]\s+/gm, '$1• ');
-
-  // Restore inline code then blocks.
-  s = s.replace(new RegExp(`${ZWI}(\\d+)\\u0000`, 'g'), (_, i) => inline[+i]);
-  s = s.replace(new RegExp(`${ZWB}(\\d+)\\u0000`, 'g'), (_, i) => blocks[+i]);
-  return s;
+// Remove tool-activity (invocation lines + their raw output blocks), leaving the
+// assistant's prose. Safety: a tool block is only suppressed if a closing marker
+// exists ahead — otherwise we keep the content so the final answer is never lost.
+function stripToolTrace(text) {
+  const lines = (text || '').split('\n');
+  const out = [];
+  let inTool = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (inTool) {
+      if (TOOL_END.test(line)) inTool = false; // consume closer, then resume
+      continue;
+    }
+    if (TOOL_START.test(line)) {
+      if (!TOOL_END.test(line)) {
+        const closesAhead = lines.slice(i + 1).some((l) => TOOL_END.test(l));
+        if (closesAhead) inTool = true; // enter block only if it will close
+      }
+      continue; // drop the invocation line itself
+    }
+    if (TOOL_LINE.test(line)) continue; // drop standalone marker lines
+    out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-function prettifyTrace(input) {
-  return input.split('\n').map((line) => {
-    let m;
-    if ((m = line.match(/^\s*I will run the following command:\s*(.+?)\s*\(using tool:[^)]*\)\s*$/i))) return `🔧 \`${m[1]}\``;
-    if ((m = line.match(/^\s*Reading directory:\s*(.+?)\s*\(using tool:[^)]*\).*$/i))) return `📂 \`${m[1]}\``;
-    if ((m = line.match(/^\s*Reading file[s]?:\s*(.+?)\s*(?:\(using tool:[^)]*\))?\s*$/i))) return `📄 \`${m[1]}\``;
-    if ((m = line.match(/^\s*(?:Writing|Creating|Updating|Editing)\s+file:?\s*(.+?)\s*(?:\(using tool:[^)]*\))?\s*$/i))) return `✏️ \`${m[1]}\``;
-    if (/^\s*✓\s+Successfully\b/i.test(line)) return line.replace(/^\s*✓\s+Successfully\s+/i, '✓ ');
-    if ((m = line.match(/^\s*-\s*Completed in\s*(.+?)\s*$/i))) return `⏱ ${m[1]}`;
-    if ((m = line.match(/^\s*Purpose:\s*(.+)$/i))) return `_↳ ${m[1]}_`;
-    return line;
-  }).join('\n');
+function toSlack(text) {
+  if (!text || !text.trim()) return text || '';
+  try { return slackifyMarkdown(text); } catch (e) { return text; }
 }
 
-// Full pipeline for Slack messages (inline). Prettify trace lines first (they add
-// inline code), then convert Markdown so the protection covers everything.
-function formatForSlack(text) {
-  if (!text || !text.trim()) return text;
-  return mdToMrkdwn(prettifyTrace(text));
+// quiet (default): strip tool trace, then Slack-format the assistant prose.
+// verbose: Slack-format the full output (trace included).
+function formatForSlack(text, { quiet = true } = {}) {
+  const base = quiet ? stripToolTrace(text) : text;
+  const finalText = base && base.trim() ? base : (text || ''); // never emit empty when there was output
+  return toSlack(finalText);
 }
 
-module.exports = { formatForSlack, mdToMrkdwn, prettifyTrace };
+module.exports = { formatForSlack, stripToolTrace, toSlack };
