@@ -94,25 +94,26 @@ function helpText() {
 }
 
 function parseNew(text) {
-  const rest = text.slice(4).trim(); // after "!new"
-  const toks = rest.length ? rest.split(/\s+/) : [];
+  let rest = text.slice(4).trim(); // after "!new"
   const patch = {};
-  let i = 0;
-  // key=value options
-  for (; i < toks.length; i++) {
-    const m = toks[i].match(/^(agent|dir|cwd|model)=(.+)$/i);
-    if (!m) break;
+  // Leading options: "key=value", "key = value", "key =value", "key= value" (value = one non-space token).
+  const optRe = /^(agent|dir|cwd|model)\s*=\s*(\S+)\s*/i;
+  let m;
+  while ((m = rest.match(optRe))) {
     const k = m[1].toLowerCase();
-    if (k === 'agent') patch.agent = m[2];
-    else if (k === 'dir' || k === 'cwd') patch.cwd = resolveDir(m[2]);
-    else if (k === 'model') patch.model = m[2];
+    const v = m[2];
+    if (k === 'agent') patch.agent = v;
+    else if (k === 'dir' || k === 'cwd') patch.cwd = resolveDir(v);
+    else if (k === 'model') patch.model = v;
+    rest = rest.slice(m[0].length);
   }
-  // bare directory alias as first positional (e.g. "!new api <task>")
-  if (patch.cwd === undefined && toks[i] && DIR_ALIASES[toks[i]]) {
-    patch.cwd = resolveDir(toks[i]);
-    i += 1;
+  // Bare first token as a directory: a known alias, or something that looks like a path.
+  if (patch.cwd === undefined) {
+    const first = rest.split(/\s+/)[0] || '';
+    if (DIR_ALIASES[first]) { patch.cwd = resolveDir(first); rest = rest.slice(first.length).trim(); }
+    else if (first.startsWith('/') || first.startsWith('~')) { patch.cwd = expandHome(first); rest = rest.slice(first.length).trim(); }
   }
-  return { patch, prompt: toks.slice(i).join(' ').trim() };
+  return { patch, prompt: rest.trim() };
 }
 
 async function sayThread(say, thread_ts, text) {
