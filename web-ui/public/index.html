@@ -5,143 +5,177 @@
 <title>Kiro Control Panel</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 <style>
-:root{--pico-font-size:15px}
-body{max-width:1100px;margin:0 auto;padding:1rem 1.5rem}
-nav{margin-bottom:1.5rem;display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap}
-nav a{cursor:pointer;text-decoration:none;opacity:.7;transition:opacity .2s}
-nav a.active,nav a:hover{opacity:1;text-decoration:underline}
-.logo{font-weight:700;font-size:1.1rem;opacity:1!important;text-decoration:none!important}
-.badge{display:inline-block;padding:.15em .5em;border-radius:4px;font-size:.75rem;font-weight:600;vertical-align:middle}
-.badge-green{background:#2d6a4f;color:#b7e4c7}.badge-red{background:#6a2d2d;color:#e4b7b7}
-.badge-blue{background:#1d3557;color:#a8dadc}.badge-gray{background:#333;color:#aaa}
-.card{border:1px solid var(--pico-muted-border-color);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem}
-.card h3{margin:0 0 .5rem}
-.stat{font-size:2rem;font-weight:700;line-height:1}
-.stat small{font-size:.85rem;font-weight:400;opacity:.7;display:block;margin-top:.25rem}
-.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}
-table{font-size:.85rem}
-.mono{font-family:monospace;font-size:.8rem;word-break:break-all}
-.copy-btn{cursor:pointer;background:none;border:1px solid var(--pico-muted-border-color);border-radius:4px;padding:.2em .5em;font-size:.75rem}
-.copy-btn:hover{background:var(--pico-primary-focus)}
-.filter-bar{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center}
-.filter-bar select,.filter-bar input{padding:.3rem .5rem;font-size:.8rem;min-width:120px}
-pre.log{background:#111;color:#ccc;padding:.75rem;border-radius:6px;max-height:400px;overflow:auto;font-size:.75rem;line-height:1.4}
-.ctx-bar{display:inline-block;width:60px;height:8px;background:#333;border-radius:4px;overflow:hidden;vertical-align:middle}
-.ctx-fill{height:100%;background:#4ecdc4;border-radius:4px}
-.empty{opacity:.5;font-style:italic;padding:2rem;text-align:center}
-#detail{display:none}
-.back{cursor:pointer;opacity:.7;font-size:.85rem}
-.back:hover{opacity:1}
+:root{--pico-font-size:14px;--accent:#4ecdc4;--surface:#1a1a2e;--surface-alt:#16213e}
+body{max-width:1200px;margin:0 auto;padding:1rem 2rem;background:var(--surface)}
+header{display:flex;align-items:center;gap:1.5rem;margin-bottom:1.5rem;padding-bottom:.75rem;border-bottom:1px solid var(--pico-muted-border-color)}
+header .logo{font-weight:800;font-size:1.2rem;color:var(--accent);letter-spacing:-.5px}
+nav a{cursor:pointer;text-decoration:none;opacity:.6;font-size:.9rem;padding:.3rem .6rem;border-radius:4px;transition:all .15s}
+nav a.active{opacity:1;background:var(--surface-alt);color:var(--accent)}
+nav a:hover{opacity:1}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:1.5rem}
+.card{background:var(--surface-alt);border:1px solid #2a2a4a;border-radius:10px;padding:1.25rem}
+.card h4{margin:0 0 .4rem;font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;opacity:.5}
+.card .val{font-size:1.8rem;font-weight:700;color:var(--accent)}
+.card .sub{font-size:.75rem;opacity:.6;margin-top:.25rem}
+
+.toolbar{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center}
+.toolbar select,.toolbar input{font-size:.8rem;padding:.35rem .5rem;background:var(--surface-alt);border:1px solid #2a2a4a;border-radius:5px;color:inherit;min-width:110px}
+.toolbar .count{font-size:.75rem;opacity:.5;margin-left:auto}
+
+table{font-size:.82rem;border-collapse:separate;border-spacing:0}
+th{text-transform:uppercase;font-size:.7rem;letter-spacing:.3px;opacity:.5;cursor:pointer;user-select:none;white-space:nowrap}
+th:hover{opacity:.8}
+th.sorted{opacity:1;color:var(--accent)}
+td{padding:.6rem .5rem;border-bottom:1px solid #1e1e3e;vertical-align:top}
+tr:hover td{background:var(--surface-alt)}
+
+.badge{display:inline-block;padding:.15em .45em;border-radius:3px;font-size:.7rem;font-weight:600}
+.b-slack{background:#1d3557;color:#a8dadc}.b-term{background:#2a2a4a;color:#999}
+.b-run{background:#1b4332;color:#95d5b2}.b-stop{background:#3d1f1f;color:#e4b7b7}
+
+.ctx{display:inline-flex;align-items:center;gap:4px;font-size:.75rem}
+.ctx-bar{width:48px;height:6px;background:#2a2a4a;border-radius:3px;overflow:hidden;display:inline-block}
+.ctx-fill{height:100%;border-radius:3px}
+.ctx-lo .ctx-fill{background:#4ecdc4}
+.ctx-mid .ctx-fill{background:#f9c74f}
+.ctx-hi .ctx-fill{background:#e76f51}
+
+.mono{font-family:'SF Mono',Menlo,monospace;font-size:.75rem}
+.copy{cursor:pointer;background:var(--surface-alt);border:1px solid #2a2a4a;border-radius:3px;padding:.15em .4em;font-size:.7rem;opacity:.7;transition:opacity .15s}
+.copy:hover{opacity:1;border-color:var(--accent)}
+
+pre.log{background:#0d0d1a;color:#bbb;padding:1rem;border-radius:8px;max-height:350px;overflow:auto;font-size:.72rem;line-height:1.5;border:1px solid #1e1e3e}
+.log-filter{display:flex;gap:.5rem;margin-bottom:.5rem;align-items:center}
+
+.detail-header{display:flex;align-items:flex-start;gap:1rem;margin-bottom:1rem}
+.detail-header h2{margin:0;font-size:1.1rem;line-height:1.3}
+.detail-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.75rem;margin-bottom:1rem}
+.detail-meta .item{font-size:.8rem}.detail-meta .label{opacity:.5;font-size:.7rem;text-transform:uppercase;display:block}
+.resume-box{background:var(--surface-alt);border:1px solid #2a2a4a;border-radius:8px;padding:.75rem 1rem;display:flex;align-items:center;gap:.75rem}
+.resume-box code{flex:1;font-size:.8rem;word-break:break-all}
+
+.thread-row{display:grid;grid-template-columns:2fr 1fr auto auto;gap:.75rem;padding:.6rem .75rem;border-bottom:1px solid #1e1e3e;align-items:center;font-size:.82rem}
+.thread-row:hover{background:var(--surface-alt)}
+.thread-title{font-weight:500;line-height:1.3}
+.thread-sub{font-size:.72rem;opacity:.5;margin-top:.15rem}
+
+.empty{opacity:.4;padding:2rem;text-align:center;font-style:italic}
+.back{cursor:pointer;opacity:.6;font-size:.8rem;margin-bottom:.75rem;display:inline-block}.back:hover{opacity:1;color:var(--accent)}
 </style>
 </head>
 <body>
-<nav>
-  <span class="logo">⚡ Kiro Panel</span>
-  <a onclick="go('dash')" id="nav-dash">Dashboard</a>
-  <a onclick="go('sessions')" id="nav-sessions">Sessions</a>
-  <a onclick="go('bridge')" id="nav-bridge">Bridge</a>
-</nav>
+<header>
+  <span class="logo">⚡ Kiro</span>
+  <nav>
+    <a onclick="go('dash')" id="n-dash">Dashboard</a>
+    <a onclick="go('sessions')" id="n-sessions">Sessions</a>
+    <a onclick="go('bridge')" id="n-bridge">Bridge</a>
+  </nav>
+</header>
 <main id="app"></main>
-
 <script>
-const $=id=>document.getElementById(id);const app=$('app');
-let currentView='dash';
-const api=async(u,m)=>{const r=await fetch(u,m?{method:'POST'}:undefined);return r.json()};
+const $=id=>document.getElementById(id),app=$('app');
+const api=async(u,m)=>{const r=await fetch(u,m?{method:'POST'}:void 0);return r.json()};
 const ago=d=>{if(!d)return'—';const s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'};
 const esc=s=>(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-const ctxBar=pct=>pct!=null?`<span class="ctx-bar"><span class="ctx-fill" style="width:${pct}%"></span></span> ${pct}%`:'—';
-const srcBadge=s=>s==='slack'?'<span class="badge badge-blue">💬 Slack</span>':'<span class="badge badge-gray">🖥 Terminal</span>';
-const copyBtn=(txt,label='📋')=>`<button class="copy-btn" onclick="navigator.clipboard.writeText('${txt.replace(/'/g,"\\'")}');this.textContent='✓';setTimeout(()=>this.textContent='${label}',1500)">${label}</button>`;
+const srcBdg=s=>s==='slack'?'<span class="badge b-slack">Slack</span>':'<span class="badge b-term">Terminal</span>';
+const ctxHtml=(pct)=>{if(pct==null)return'<span class="ctx">—</span>';const c=pct>80?'ctx-hi':pct>50?'ctx-mid':'ctx-lo';return `<span class="ctx ${c}"><span class="ctx-bar"><span class="ctx-fill" style="width:${pct}%"></span></span>${pct}%</span>`};
+const copyBtn=(txt)=>`<button class="copy" onclick="navigator.clipboard.writeText(\`${txt.replace(/`/g,'\\`')}\`);this.textContent='✓';setTimeout(()=>this.textContent='📋',1200)">📋</button>`;
+let curView='dash',sessSort='updated',sessSource='all',sessQ='';
 
 async function renderDash(){
   const d=await api('/api/status');
-  const bStatus=d.bridge.running?'<span class="badge badge-green">● Running</span>':'<span class="badge badge-red">● Stopped</span>';
+  const sessions=await api('/api/sessions?sort=updated');
   app.innerHTML=`
-  <div class="grid3">
-    <div class="card"><div class="stat">${bStatus}<small>Slack Bridge</small></div></div>
-    <div class="card"><div class="stat">${d.sessions}<small>Total Sessions</small></div></div>
-    <div class="card"><div class="stat">${d.threads}<small>Active Threads</small></div></div>
+  <div class="cards">
+    <div class="card"><h4>Bridge</h4><div class="val">${d.bridge.running?'<span class="badge b-run">● Online</span>':'<span class="badge b-stop">● Offline</span>'}</div><div class="sub">${d.bridge.pid?'PID '+d.bridge.pid:''}</div></div>
+    <div class="card"><h4>Sessions</h4><div class="val">${d.sessions}</div><div class="sub">total across all sources</div></div>
+    <div class="card"><h4>Slack Threads</h4><div class="val">${d.threads}</div><div class="sub">active conversations</div></div>
   </div>
-  <div class="card"><h3>Recent Sessions</h3><div id="recent">Loading…</div></div>`;
-  const s=await api('/api/sessions?sort=updated');
-  $('recent').innerHTML=s.slice(0,8).map(x=>`
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--pico-muted-border-color)">
-      <div><a onclick="showDetail('${x.id}')" style="cursor:pointer">${esc(x.title.slice(0,60))}</a><br><small>${srcBadge(x.source)} <code>${x.agent||'—'}</code> · ${x.cwdShort||'—'}</small></div>
-      <div style="text-align:right;font-size:.8rem">${ctxBar(x.contextPct)}<br><small>${ago(x.updatedAt)}</small></div>
-    </div>`).join('')||'<p class="empty">No sessions yet.</p>';
+  <div class="card"><h4>Recent Activity</h4>
+  <table><thead><tr><th>Session</th><th>Source</th><th>Agent</th><th>Dir</th><th>Context</th><th>Active</th></tr></thead><tbody>
+  ${sessions.slice(0,10).map(s=>`<tr style="cursor:pointer" onclick="showDetail('${s.id}')">
+    <td>${esc(s.title.slice(0,50))}</td><td>${srcBdg(s.source)}</td><td><code>${s.agent||'—'}</code></td>
+    <td title="${esc(s.cwd)}">${s.cwdShort||'—'}</td><td>${ctxHtml(s.contextPct)}</td><td>${ago(s.updatedAt)}</td>
+  </tr>`).join('')}</tbody></table></div>`;
 }
 
-let sessionData=[];
 async function renderSessions(){
-  const params=new URLSearchParams();
-  const source=$('f-source')?.value;const agent=$('f-agent')?.value;const q=$('f-q')?.value;
-  if(source&&source!=='all')params.set('source',source);
-  if(agent)params.set('agent',agent);
-  if(q)params.set('q',q);
-  sessionData=await api('/api/sessions?'+params);
-  const rows=sessionData.map(x=>`<tr>
-    <td><a onclick="showDetail('${x.id}')" style="cursor:pointer">${esc(x.title.slice(0,55))}</a></td>
-    <td>${srcBadge(x.source)}</td>
-    <td><code>${x.agent||'—'}</code></td>
-    <td title="${esc(x.cwd)}">${x.cwdShort||'—'}</td>
-    <td>${ctxBar(x.contextPct)}</td>
-    <td>${x.messages}</td>
-    <td>${ago(x.updatedAt)}</td>
-    <td>${copyBtn('cd '+(x.cwd||'~')+' && kiro-cli chat --resume-id '+x.id)}</td>
-  </tr>`).join('');
+  const params=new URLSearchParams({sort:sessSort});
+  if(sessSource!=='all')params.set('source',sessSource);if(sessQ)params.set('q',sessQ);
+  const data=await api('/api/sessions?'+params);
   app.innerHTML=`
-  <div class="filter-bar">
-    <select id="f-source" onchange="renderSessions()"><option value="all">All sources</option><option value="terminal">🖥 Terminal</option><option value="slack">💬 Slack</option></select>
-    <input id="f-q" placeholder="Search…" oninput="renderSessions()" value="${esc(q||'')}">
-    <small style="opacity:.6">${sessionData.length} sessions</small>
+  <div class="toolbar">
+    <select id="fs" onchange="sessSource=this.value;renderSessions()"><option value="all">All sources</option><option value="terminal"${sessSource==='terminal'?' selected':''}>🖥 Terminal</option><option value="slack"${sessSource==='slack'?' selected':''}>💬 Slack</option></select>
+    <select id="fo" onchange="sessSort=this.value;renderSessions()"><option value="updated"${sessSort==='updated'?' selected':''}>Last active</option><option value="messages"${sessSort==='messages'?' selected':''}>Messages</option><option value="context"${sessSort==='context'?' selected':''}>Context %</option></select>
+    <input placeholder="Search sessions…" value="${esc(sessQ)}" oninput="sessQ=this.value;clearTimeout(this._t);this._t=setTimeout(()=>renderSessions(),300)">
+    <span class="count">${data.length} sessions</span>
   </div>
-  <table><thead><tr><th>Title</th><th>Source</th><th>Agent</th><th>Dir</th><th>Context</th><th>Msgs</th><th>Last</th><th></th></tr></thead>
-  <tbody>${rows||'<tr><td colspan="8" class="empty">No sessions found.</td></tr>'}</tbody></table>`;
-  if(source)$('f-source').value=source;
+  <table><thead><tr><th>Title</th><th>Source</th><th>Agent</th><th>Directory</th><th>Context</th><th>Msgs</th><th>Last Active</th><th></th></tr></thead>
+  <tbody>${data.map(s=>`<tr>
+    <td><a style="cursor:pointer" onclick="showDetail('${s.id}')">${esc(s.title.slice(0,50))}</a></td>
+    <td>${srcBdg(s.source)}</td><td><code>${s.agent||'—'}</code></td>
+    <td title="${esc(s.cwd)}"><code>${s.cwdShort||'—'}</code></td>
+    <td>${ctxHtml(s.contextPct)}</td><td>${s.messages||'—'}</td><td>${ago(s.updatedAt)}</td>
+    <td>${copyBtn('cd '+(s.cwd||'~')+' && kiro-cli chat --resume-id '+s.id)}</td>
+  </tr>`).join('')||'<tr><td colspan="8" class="empty">No sessions found.</td></tr>'}</tbody></table>`;
 }
 
 async function showDetail(id){
-  currentView='detail';setNav();
+  curView='detail';setNav();
   const d=await api('/api/sessions/'+id);
   app.innerHTML=`
-  <p class="back" onclick="go('sessions')">← Sessions</p>
-  <div class="card">
-    <h3>${esc(d.title)}</h3>
-    <p>${srcBadge(d.source)} <code>${d.agent||'default'}</code> · <code>${d.model||'auto'}</code> · ${ctxBar(d.contextPct)} · ${d.messages} msgs</p>
-    <p><strong>Dir:</strong> <code>${esc(d.cwd||'~')}</code></p>
-    <p><strong>Created:</strong> ${d.createdAt||'—'} · <strong>Updated:</strong> ${ago(d.updatedAt)}</p>
-    <p><strong>Resume:</strong></p>
-    <pre class="mono">${esc(d.resumeCmd)}</pre>
-    ${copyBtn(d.resumeCmd,'📋 Copy command')}
+  <span class="back" onclick="go('sessions')">← Back to Sessions</span>
+  <div class="detail-header"><h2>${esc(d.title)}</h2></div>
+  <div class="detail-meta">
+    <div class="item"><span class="label">Source</span>${srcBdg(d.source)}</div>
+    <div class="item"><span class="label">Agent</span><code>${d.agent||'default'}</code></div>
+    <div class="item"><span class="label">Model</span><code>${d.model||'auto'}</code></div>
+    <div class="item"><span class="label">Context</span>${ctxHtml(d.contextPct)}</div>
+    <div class="item"><span class="label">Messages</span>${d.messages}</div>
+    <div class="item"><span class="label">Directory</span><code class="mono">${esc(d.cwd||'~')}</code></div>
+    <div class="item"><span class="label">Created</span>${ago(d.createdAt)}</div>
+    <div class="item"><span class="label">Last Active</span>${ago(d.updatedAt)}</div>
   </div>
-  ${d.preview&&d.preview.total?`<div class="card"><h3>Conversation preview</h3><small>${d.preview.total} messages total — showing first/last</small>
-    <pre class="log">${(d.preview.first||[]).map(m=>esc(JSON.stringify(m).slice(0,300))).join('\n')}\n…\n${(d.preview.last||[]).map(m=>esc(JSON.stringify(m).slice(0,300))).join('\n')}</pre>
-  </div>`:''}`;
+  <div class="resume-box"><code>${esc(d.resumeCmd)}</code>${copyBtn(d.resumeCmd)}</div>
+  ${d.preview&&d.preview.total?`<div class="card" style="margin-top:1rem"><h4>Conversation (${d.preview.total} messages)</h4><pre class="log">${[...(d.preview.first||[]),...(d.preview.last||[])].map(m=>esc(JSON.stringify(m).slice(0,200))).join('\n')}</pre></div>`:''}`;
 }
 
+let logFilter='';
 async function renderBridge(){
   const st=await api('/api/status');
   const threads=await api('/api/bridge/threads');
-  const logs=await api('/api/bridge/logs?n=60');
-  const bStatus=st.bridge.running?'<span class="badge badge-green">● Running</span> PID '+st.bridge.pid:'<span class="badge badge-red">● Stopped</span>';
+  const logs=await api('/api/bridge/logs?n=80&filter='+encodeURIComponent(logFilter));
   app.innerHTML=`
-  <div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-    <div>${bStatus}</div>
-    <button onclick="bridgeAction('start')">▶ Start</button>
-    <button onclick="bridgeAction('stop')">⏹ Stop</button>
-    <button onclick="bridgeAction('restart')">🔄 Restart</button>
+  <div class="cards">
+    <div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+      ${st.bridge.running?'<span class="badge b-run">● Online</span> PID '+st.bridge.pid:'<span class="badge b-stop">● Offline</span>'}
+      <button onclick="bCmd('start')">▶ Start</button>
+      <button onclick="bCmd('stop')">⏹ Stop</button>
+      <button onclick="bCmd('restart')">↻ Restart</button>
+    </div>
   </div>
-  <div class="card"><h3>Active Slack Threads (${threads.length})</h3>
-  ${threads.length?`<table><thead><tr><th>Thread</th><th>Session</th><th>Dir</th><th>Agent</th></tr></thead><tbody>
-  ${threads.map(t=>`<tr><td class="mono">${t.key.split(':')[1]||t.key}</td><td class="mono">${(t.sessionId||'—').slice(0,12)}</td><td>${t.cwdShort||path_base(t.cwd)}</td><td>${t.agent||'—'}</td></tr>`).join('')}
-  </tbody></table>`:'<p class="empty">No active threads.</p>'}</div>
-  <div class="card"><h3>Logs</h3><pre class="log" id="logbox">${logs.lines.map(esc).join('\n')}</pre></div>`;
-}
-function path_base(p){return p?p.split('/').pop():'—'}
-async function bridgeAction(cmd){await api('/api/bridge/'+cmd,true);setTimeout(()=>renderBridge(),2000);}
 
-function setNav(){document.querySelectorAll('nav a').forEach(a=>a.classList.remove('active'));const n=$('nav-'+currentView);if(n)n.classList.add('active');}
-function go(view){currentView=view;setNav();if(view==='dash')renderDash();else if(view==='sessions')renderSessions();else if(view==='bridge')renderBridge();}
+  <div class="card"><h4>Active Slack Threads (${threads.length})</h4>
+  ${threads.length?threads.map(t=>`<div class="thread-row">
+    <div><div class="thread-title">${esc(t.title)||'<span style="opacity:.4">Untitled session</span>'}</div>
+      <div class="thread-sub">${t.agent||'main'} · ${t.cwdShort||'—'}${t.messages?' · '+t.messages+' msgs':''}</div></div>
+    <div style="font-size:.75rem;opacity:.6">${ago(t.lastActive)}</div>
+    <div><code class="mono" style="font-size:.7rem">${(t.sessionId||'—').slice(0,12)}</code></div>
+    <div>${t.sessionId?copyBtn('cd '+(t.cwd||'~')+' && kiro-cli chat --resume-id '+t.sessionId):''}</div>
+  </div>`).join(''):'<p class="empty">No active threads.</p>'}</div>
+
+  <div class="card"><h4>Logs</h4>
+    <div class="log-filter"><input placeholder="Filter logs…" value="${esc(logFilter)}" oninput="logFilter=this.value;clearTimeout(this._t);this._t=setTimeout(()=>refreshLogs(),400)"><button onclick="refreshLogs()">↻</button></div>
+    <pre class="log" id="logbox">${logs.lines.map(esc).join('\n')}</pre>
+  </div>`;
+}
+async function refreshLogs(){const l=await api('/api/bridge/logs?n=80&filter='+encodeURIComponent(logFilter));const box=$('logbox');if(box)box.innerHTML=l.lines.map(esc).join('\n');}
+async function bCmd(c){await api('/api/bridge/'+c,true);setTimeout(renderBridge,2500);}
+
+function setNav(){document.querySelectorAll('nav a').forEach(a=>a.classList.remove('active'));const n=$('n-'+curView);if(n)n.classList.add('active');}
+function go(v){curView=v;setNav();if(v==='dash')renderDash();else if(v==='sessions')renderSessions();else if(v==='bridge')renderBridge();}
 go('dash');
 </script>
 </body>

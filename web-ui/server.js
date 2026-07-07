@@ -82,16 +82,34 @@ app.post('/api/bridge/restart', (req, res) => res.json({ ok: true, msg: bridgeCm
 
 app.get('/api/bridge/logs', (req, res) => {
   const n = Math.min(parseInt(req.query.n) || 80, 500);
+  const filter = (req.query.filter || '').toLowerCase();
   try {
-    const lines = execSync(`tail -n ${n} "${BRIDGE_LOG}"`, { encoding: 'utf8' })
-      .replace(/xox[bp]-[A-Za-z0-9-]+/g, '[REDACTED]');
-    res.json({ lines: lines.split('\n') });
+    let lines = execSync(`tail -n ${n * 3} "${BRIDGE_LOG}"`, { encoding: 'utf8' })
+      .replace(/xox[bp]-[A-Za-z0-9-]+/g, '[REDACTED]').split('\n');
+    if (filter) lines = lines.filter(l => l.toLowerCase().includes(filter));
+    res.json({ lines: lines.slice(-n) });
   } catch { res.json({ lines: ['(no log file)'] }); }
 });
 
 app.get('/api/bridge/threads', (req, res) => {
   const st = getBridgeState();
-  const threads = Object.entries(st).map(([key, v]) => ({ key, ...v }));
+  // kiro-cli --list-sessions is cwd-scoped; scan all unique cwds from state
+  let titleMap = {};
+  const cwds = [...new Set(Object.values(st).map(v => v.cwd).filter(Boolean))];
+  for (const cwd of cwds) {
+    try {
+      const raw = execSync('kiro-cli chat --list-sessions -f json', { cwd, encoding: 'utf8', timeout: 8000 });
+      const entries = JSON.parse(raw);
+      entries.forEach(e => (e.sessions || []).forEach(s => {
+        titleMap[s.sessionId] = { title: (s.title || '').slice(0, 80), messages: s.messageCount, updatedAt: s.updatedAt };
+      }));
+    } catch {}
+  }
+  const threads = Object.entries(st).map(([key, v]) => {
+    const info = titleMap[v.sessionId] || {};
+    return { key, ...v, title: info.title || null, messages: info.messages || null, lastActive: info.updatedAt || null, cwdShort: v.cwd ? path.basename(v.cwd) : null };
+  });
+  threads.sort((a, b) => (b.lastActive || '').localeCompare(a.lastActive || ''));
   res.json(threads);
 });
 
