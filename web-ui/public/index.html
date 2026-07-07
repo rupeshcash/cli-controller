@@ -3,123 +3,92 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Kiro · Control Panel</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0a0e1a;--surface:#111827;--surface-up:#1a2235;--surface-hover:#1e293b;
+  --bg:#0a0e1a;--surface:#111827;--surface-up:#1a2235;--surface-hover:#1b2438;
   --border:#1e293b;--border-lit:#2d3a4f;
-  --text:#e2e8f0;--text-dim:#64748b;--text-muted:#475569;
-  --accent:#06d6a0;--accent-dim:#06d6a033;--accent-glow:0 0 20px #06d6a022;
-  --danger:#ef4444;--warn:#f59e0b;
-  --font-display:'Outfit',sans-serif;--font-mono:'JetBrains Mono',monospace;
-  --radius:12px;--radius-sm:8px;
+  --text:#e6edf5;--text-dim:#7488a3;--text-muted:#4a5a72;
+  --accent:#06d6a0;--accent-2:#38bdf8;--accent-dim:#06d6a022;--glow:0 0 24px #06d6a01f;
+  --danger:#f43f5e;--warn:#f59e0b;
+  --fd:'Outfit',sans-serif;--fm:'JetBrains Mono',monospace;--r:12px;--rs:8px;
 }
-body{background:var(--bg);color:var(--text);font-family:var(--font-display);font-size:14px;line-height:1.6;min-height:100vh;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.015'/%3E%3C/svg%3E");
-}
-a{color:var(--accent);text-decoration:none;cursor:pointer}a:hover{text-decoration:underline}
-code{font-family:var(--font-mono);font-size:.8em;background:var(--surface);padding:.15em .4em;border-radius:4px;color:var(--accent)}
-
-/* Layout */
-.shell{max-width:1280px;margin:0 auto;padding:2rem 2.5rem}
-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:2.5rem;padding-bottom:1.25rem;border-bottom:1px solid var(--border)}
-.brand{display:flex;align-items:center;gap:.6rem}
-.brand svg{width:24px;height:24px}
-.brand h1{font-size:1.1rem;font-weight:700;letter-spacing:-.3px}
-.brand span{color:var(--text-dim);font-weight:300;margin-left:.3rem;font-size:.85rem}
-nav{display:flex;gap:.25rem}
-nav button{background:none;border:none;color:var(--text-dim);font-family:var(--font-display);font-size:.85rem;padding:.5rem 1rem;border-radius:var(--radius-sm);cursor:pointer;transition:all .15s}
-nav button:hover{color:var(--text);background:var(--surface)}
-nav button.active{color:var(--accent);background:var(--accent-dim);font-weight:600}
-
-/* Cards */
-.grid{display:grid;gap:1.25rem}
-.grid-3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;transition:border-color .2s,box-shadow .2s}
-.card:hover{border-color:var(--border-lit);box-shadow:var(--accent-glow)}
-.card-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);margin-bottom:.5rem;font-weight:600}
-.card-value{font-size:2.2rem;font-weight:700;font-family:var(--font-mono);color:var(--text)}
-.card-sub{font-size:.75rem;color:var(--text-dim);margin-top:.35rem}
-
-/* Status dot */
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:.4rem}
-.dot-on{background:var(--accent);box-shadow:0 0 8px var(--accent)}
-.dot-off{background:var(--danger);box-shadow:0 0 8px var(--danger)}
-
-/* Table */
-.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+body{background:var(--bg);color:var(--text);font-family:var(--fd);font-size:14px;line-height:1.6;min-height:100vh;
+  background-image:radial-gradient(1200px 600px at 80% -10%,#0d213033,transparent),url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.015'/%3E%3C/svg%3E")}
+a{color:var(--accent);text-decoration:none;cursor:pointer}
+code{font-family:var(--fm);font-size:.8em;background:var(--surface);padding:.15em .4em;border-radius:4px;color:var(--accent-2)}
+.shell{max-width:1300px;margin:0 auto;padding:1.75rem 2.25rem}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:.55rem}.brand svg{width:22px;height:22px}
+.brand h1{font-size:1.05rem;font-weight:700;letter-spacing:-.3px}.brand span{color:var(--text-dim);font-weight:300;margin-left:.3rem;font-size:.82rem}
+nav{display:flex;gap:.25rem;background:var(--surface);padding:.25rem;border-radius:10px;border:1px solid var(--border)}
+nav button{display:flex;align-items:center;gap:.4rem;background:none;border:none;color:var(--text-dim);font-family:var(--fd);font-size:.83rem;font-weight:500;padding:.45rem .9rem;border-radius:7px;cursor:pointer;transition:all .18s}
+nav button svg{width:15px;height:15px}
+nav button:hover{color:var(--text)}
+nav button.active{color:#04120c;background:var(--accent);font-weight:600}
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.1rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:1.4rem;transition:border-color .2s,box-shadow .2s,transform .2s}
+.card:hover{border-color:var(--border-lit);box-shadow:var(--glow)}
+.card-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.9px;color:var(--text-muted);margin-bottom:.5rem;font-weight:600}
+.card-value{font-size:2.1rem;font-weight:700;font-family:var(--fm);display:flex;align-items:center}
+.card-sub{font-size:.74rem;color:var(--text-dim);margin-top:.3rem}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:.5rem;animation:pulse 2s infinite}
+.dot-on{background:var(--accent);box-shadow:0 0 10px var(--accent)}.dot-off{background:var(--danger);box-shadow:0 0 10px var(--danger);animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
 table{width:100%;border-collapse:collapse;font-size:.82rem}
-th{text-align:left;padding:.75rem 1rem;font-size:.68rem;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);border-bottom:1px solid var(--border);font-weight:600;cursor:pointer;white-space:nowrap;user-select:none}
-th:hover{color:var(--text)}
-td{padding:.7rem 1rem;border-bottom:1px solid var(--border);vertical-align:middle}
+th{text-align:left;padding:.7rem 1rem;font-size:.67rem;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);border-bottom:1px solid var(--border);font-weight:600;white-space:nowrap;cursor:pointer;user-select:none;transition:color .15s;position:sticky;top:0;background:var(--surface)}
+th.sortable:hover{color:var(--text)}
+th .arr{display:inline-block;width:10px;margin-left:.25rem;opacity:.35;transition:opacity .15s}
+th.active-sort{color:var(--accent)}th.active-sort .arr{opacity:1;color:var(--accent)}
+td{padding:.68rem 1rem;border-bottom:1px solid var(--border);vertical-align:middle}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:var(--surface-hover)}
-tbody tr{cursor:pointer;transition:background .1s}
-
-/* Badges */
-.badge{display:inline-flex;align-items:center;gap:4px;padding:.2em .55em;border-radius:5px;font-size:.7rem;font-weight:600;font-family:var(--font-mono)}
-.badge-slack{background:#1e3a5f;color:#7dd3fc}.badge-term{background:#1e293b;color:#94a3b8}
-.badge-on{background:#064e3b;color:#6ee7b7}.badge-off{background:#450a0a;color:#fca5a5}
-
-/* Context meter */
-.meter{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;font-family:var(--font-mono)}
-.meter-bar{width:56px;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
-.meter-fill{height:100%;border-radius:3px;transition:width .3s}
-.meter-lo .meter-fill{background:var(--accent)}.meter-mid .meter-fill{background:var(--warn)}.meter-hi .meter-fill{background:var(--danger)}
-
-/* Toolbar */
-.toolbar{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:1.25rem}
-.toolbar select,.toolbar input{font-family:var(--font-mono);font-size:.78rem;padding:.45rem .65rem;background:var(--surface-up);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);outline:none;transition:border-color .15s}
-.toolbar select:focus,.toolbar input:focus{border-color:var(--accent)}
-.toolbar .count{margin-left:auto;font-size:.72rem;color:var(--text-dim)}
-
-/* Buttons */
-.btn{font-family:var(--font-display);font-size:.8rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-up);color:var(--text);cursor:pointer;transition:all .15s}
-.btn:hover{border-color:var(--accent);color:var(--accent);box-shadow:var(--accent-glow)}
-.btn-accent{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
-.copy-btn{font-family:var(--font-mono);font-size:.7rem;padding:.2rem .45rem;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-dim);cursor:pointer;transition:all .15s}
-.copy-btn:hover{border-color:var(--accent);color:var(--accent)}
-
-/* Log */
-.log{background:#060a12;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem;max-height:360px;overflow:auto;font-family:var(--font-mono);font-size:.72rem;line-height:1.7;color:var(--text-dim);white-space:pre-wrap;word-break:break-all}
-
-/* Detail */
-.detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem}
-.detail-item .label{font-size:.65rem;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:.2rem}
-.detail-item .val{font-size:.9rem;font-weight:500}
-.resume-box{display:flex;align-items:center;gap:1rem;background:var(--surface-up);border:1px solid var(--border);border-radius:var(--radius-sm);padding:.8rem 1.25rem;margin-bottom:1.5rem}
-.resume-box code{flex:1;font-size:.78rem;color:var(--text);background:none;padding:0}
-
-/* Thread cards */
-.thread{display:grid;grid-template-columns:1fr auto auto;gap:1rem;align-items:center;padding:.9rem 1.25rem;border-bottom:1px solid var(--border);transition:background .1s}
-.thread:last-child{border-bottom:none}
-.thread:hover{background:var(--surface-hover)}
-.thread-title{font-weight:500;font-size:.85rem;line-height:1.3;margin-bottom:.2rem}
-.thread-meta{font-size:.72rem;color:var(--text-dim);font-family:var(--font-mono)}
-
-/* Animations */
-@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.anim{animation:fadeUp .3s ease-out both}
-.anim-d1{animation-delay:.05s}.anim-d2{animation-delay:.1s}.anim-d3{animation-delay:.15s}
-
-/* Empty state */
-.empty{text-align:center;padding:3rem;color:var(--text-dim);font-style:italic}
-.back{font-size:.8rem;color:var(--text-dim);cursor:pointer;margin-bottom:1rem;display:inline-block}.back:hover{color:var(--accent)}
+tbody tr{cursor:pointer;transition:background .1s}tbody tr:hover td{background:var(--surface-hover)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:.2em .55em;border-radius:5px;font-size:.68rem;font-weight:600;font-family:var(--fm)}
+.b-slack{background:#0c2b45;color:#7dd3fc}.b-term{background:#1e293b;color:#94a3b8}
+.meter{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-family:var(--fm)}
+.meter-bar{width:52px;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+.meter-fill{height:100%;border-radius:3px}
+.lo .meter-fill{background:var(--accent)}.mid .meter-fill{background:var(--warn)}.hi .meter-fill{background:var(--danger)}
+.toolbar{display:flex;gap:.55rem;flex-wrap:wrap;align-items:center;margin-bottom:1.1rem}
+.field{position:relative;display:inline-flex;align-items:center}
+.field svg{position:absolute;left:.6rem;width:14px;height:14px;color:var(--text-muted);pointer-events:none}
+select,input.search{font-family:var(--fd);font-size:.8rem;padding:.5rem .7rem .5rem 2rem;background:var(--surface-up);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);outline:none;transition:border-color .15s;appearance:none;cursor:pointer}
+input.search{cursor:text;min-width:200px}
+select:focus,input.search:focus{border-color:var(--accent)}
+select{padding-right:1.8rem;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='none' stroke='%237488a3' stroke-width='2'%3E%3Cpath d='M2 3l3 3 3-3'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right .6rem center}
+.count{margin-left:auto;font-size:.72rem;color:var(--text-dim);font-family:var(--fm)}
+.btn{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--fd);font-size:.8rem;font-weight:500;padding:.5rem .9rem;border:1px solid var(--border);border-radius:var(--rs);background:var(--surface-up);color:var(--text);cursor:pointer;transition:all .15s}
+.btn svg{width:14px;height:14px}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:#04120c;font-weight:600}.btn-accent:hover{color:#04120c;opacity:.9}
+.copy-btn{display:inline-flex;align-items:center;gap:3px;font-family:var(--fm);font-size:.68rem;padding:.25rem .5rem;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text-dim);cursor:pointer;transition:all .15s}
+.copy-btn svg{width:12px;height:12px}.copy-btn:hover{border-color:var(--accent);color:var(--accent)}
+.log{background:#060a12;border:1px solid var(--border);border-radius:var(--rs);padding:1rem;max-height:360px;overflow:auto;font-family:var(--fm);font-size:.72rem;line-height:1.7;color:var(--text-dim);white-space:pre-wrap;word-break:break-all}
+.detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem;margin-bottom:1.4rem}
+.detail-item .label{font-size:.64rem;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:.2rem}
+.detail-item .val{font-size:.88rem;font-weight:500}
+.resume-box{display:flex;align-items:center;gap:1rem;background:var(--surface-up);border:1px solid var(--border);border-radius:var(--rs);padding:.75rem 1.15rem;margin-bottom:1.4rem}
+.resume-box code{flex:1;font-size:.76rem;color:var(--text);background:none;padding:0}
+.thread{display:grid;grid-template-columns:1fr auto auto;gap:1rem;align-items:center;padding:.85rem 1.15rem;border-bottom:1px solid var(--border);transition:background .1s}
+.thread:last-child{border-bottom:none}.thread:hover{background:var(--surface-hover)}
+.thread-title{font-weight:500;font-size:.85rem;margin-bottom:.15rem}.thread-meta{font-size:.71rem;color:var(--text-dim);font-family:var(--fm)}
+.empty{text-align:center;padding:2.5rem;color:var(--text-dim);font-style:italic}
+.back{display:inline-flex;align-items:center;gap:.3rem;font-size:.8rem;color:var(--text-dim);cursor:pointer;margin-bottom:1rem}.back:hover{color:var(--accent)}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+#app{animation:fade .22s ease-out}
+.sec-title{font-size:.9rem;font-weight:600;margin-bottom:.9rem;color:var(--text)}
 </style>
 </head>
 <body>
 <div class="shell">
 <header>
   <div class="brand">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="var(--accent)"/></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
     <h1>Kiro<span>Control Panel</span></h1>
   </div>
-  <nav>
-    <button onclick="go('dash')" id="n-dash">Dashboard</button>
-    <button onclick="go('sessions')" id="n-sessions">Sessions</button>
-    <button onclick="go('bridge')" id="n-bridge">Bridge</button>
-  </nav>
+  <nav id="nav"></nav>
 </header>
 <main id="app"></main>
 </div>
@@ -128,89 +97,144 @@ const $=id=>document.getElementById(id),app=$('app');
 const api=async(u,m)=>{const r=await fetch(u,m?{method:'POST'}:void 0);return r.json()};
 const ago=d=>{if(!d)return'—';const s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d'};
 const esc=s=>(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-const srcB=s=>s==='slack'?'<span class="badge badge-slack">slack</span>':'<span class="badge badge-term">terminal</span>';
-const meterHtml=p=>{if(p==null)return'<span class="meter">—</span>';const c=p>80?'meter-hi':p>50?'meter-mid':'meter-lo';return`<span class="meter ${c}"><span class="meter-bar"><span class="meter-fill" style="width:${p}%"></span></span>${p}%</span>`};
-const copyFn=t=>`navigator.clipboard.writeText(\`${t.replace(/`/g,'\\`')}\`);this.textContent='✓';setTimeout(()=>this.textContent='copy',1000)`;
-let curView='dash',sSort='updated',sSrc='all',sQ='';
+const ic={dash:'<path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>',list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',bridge:'<path d="M4 7v10M20 7v10M4 12h16M8 12V8M16 12V8M8 12v4M16 12v4"/>',copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/>',filter:'<path d="M3 4h18l-7 8v6l-4 2v-8z"/>',sort:'<path d="M3 6h18M6 12h12M9 18h6"/>',back:'<path d="M19 12H5M12 19l-7-7 7-7"/>',play:'<path d="M6 4l14 8-14 8z"/>',stop:'<rect x="5" y="5" width="14" height="14" rx="2"/>',restart:'<path d="M4 12a8 8 0 018-8 8 8 0 017 4M20 4v4h-4"/><path d="M20 12a8 8 0 01-8 8 8 8 0 01-7-4M4 20v-4h4"/>'};
+const svg=(p,c='')=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${c}">${p}</svg>`;
+const srcB=s=>s==='slack'?'<span class="badge b-slack">slack</span>':'<span class="badge b-term">terminal</span>';
+const meter=p=>{if(p==null)return'<span class="meter">—</span>';const c=p>80?'hi':p>50?'mid':'lo';return`<span class="meter ${c}"><span class="meter-bar"><span class="meter-fill" style="width:${p}%"></span></span>${p}%</span>`};
+const copyBtn=t=>`<button class="copy-btn" onclick="event.stopPropagation();navigator.clipboard.writeText(\`${t.replace(/`/g,'\\`')}\`);const o=this.innerHTML;this.innerHTML='✓';setTimeout(()=>this.innerHTML=o,1000)">${svg(ic.copy)}copy</button>`;
 
-async function renderDash(){
-  const d=await api('/api/status');const ss=await api('/api/sessions?sort=updated');
-  app.innerHTML=`
-  <div class="grid grid-3" style="margin-bottom:2rem">
-    <div class="card anim"><div class="card-label">Bridge</div><div class="card-value"><span class="dot ${d.bridge.running?'dot-on':'dot-off'}"></span>${d.bridge.running?'Online':'Offline'}</div><div class="card-sub">${d.bridge.pid?'PID '+d.bridge.pid:'—'}</div></div>
-    <div class="card anim anim-d1"><div class="card-label">Sessions</div><div class="card-value">${d.sessions}</div><div class="card-sub">across all sources</div></div>
-    <div class="card anim anim-d2"><div class="card-label">Slack Threads</div><div class="card-value">${d.threads}</div><div class="card-sub">active conversations</div></div>
-  </div>
-  <div class="card anim anim-d3"><div class="card-label">Recent Activity</div>
-    <div class="table-wrap" style="border:none"><table><thead><tr><th>Session</th><th>Source</th><th>Agent</th><th>Dir</th><th>Context</th><th>Active</th></tr></thead><tbody>
-    ${ss.slice(0,10).map(s=>`<tr onclick="showDetail('${s.id}')"><td>${esc(s.title.slice(0,45))}</td><td>${srcB(s.source)}</td><td><code>${s.agent||'—'}</code></td><td><code>${s.cwdShort||'—'}</code></td><td>${meterHtml(s.contextPct)}</td><td style="color:var(--text-dim)">${ago(s.updatedAt)}</td></tr>`).join('')}
-    </tbody></table></div></div>`;
+let curView='dash';
+const NAV=[['dash','Dashboard',ic.dash],['sessions','Sessions',ic.list],['bridge','Bridge',ic.bridge]];
+$('nav').innerHTML=NAV.map(([k,l,i])=>`<button id="n-${k}" onclick="go('${k}')">${svg(i)}${l}</button>`).join('');
+function setNav(){document.querySelectorAll('#nav button').forEach(b=>b.classList.remove('active'));const k=curView==='detail'?'sessions':curView;const n=$('n-'+k);if(n)n.classList.add('active')}
+
+// ── Generic sortable table ──
+function sortData(rows,key,dir,type){
+  const m=dir==='asc'?1:-1;
+  return [...rows].sort((a,b)=>{
+    let x=a[key],y=b[key];
+    if(type==='num'){x=x==null?-Infinity:x;y=y==null?-Infinity:y;return(x-y)*m}
+    x=(x||'').toString().toLowerCase();y=(y||'').toString().toLowerCase();
+    return x<y?-1*m:x>y?1*m:0;
+  });
 }
+function th(cols,sort){return'<tr>'+cols.map(c=>{
+  if(!c.key)return`<th>${c.label||''}</th>`;
+  const act=sort.key===c.key;const arr=act?(sort.dir==='asc'?'▲':'▼'):'↕';
+  return`<th class="sortable${act?' active-sort':''}" onclick="onSort('${c.key}','${c.type||'str'}')">${c.label}<span class="arr">${arr}</span></th>`;
+}).join('')+'</tr>'}
 
+// ── SESSIONS ──
+let SESS=[],sSort={key:'updatedAt',dir:'desc',type:'num2date'},sSrc='all',sAgent='all',sQ='';
+async function loadSessions(){SESS=await api('/api/sessions?sort=updated')}
+function sessCols(){return[
+  {key:'title',label:'Title'},{key:'source',label:'Source'},{key:'agent',label:'Agent'},
+  {key:'cwdShort',label:'Dir'},{key:'contextPct',label:'Context',type:'num'},
+  {key:'messages',label:'Msgs',type:'num'},{key:'updatedAt',label:'Active',type:'num'},{label:''}];}
+function onSort(key,type){if(sSort.key===key)sSort.dir=sSort.dir==='asc'?'desc':'asc';else{sSort={key,dir:type==='num'?'desc':'asc',type}}
+  if(curView==='sessions')paintSessions();else if(curView==='bridge')paintThreads();}
+function filteredSess(){let r=SESS.slice();
+  if(sSrc!=='all')r=r.filter(s=>s.source===sSrc);
+  if(sAgent!=='all')r=r.filter(s=>(s.agent||'')===sAgent);
+  if(sQ){const q=sQ.toLowerCase();r=r.filter(s=>(s.title+' '+s.cwd).toLowerCase().includes(q))}
+  const type=sSort.type==='num'?'num':(sSort.key==='updatedAt'||sSort.key==='createdAt'?'num':'str');
+  return sortData(r, sSort.key, sSort.dir, sSort.key==='contextPct'||sSort.key==='messages'?'num':'str');}
+function paintSessions(){
+  const data=filteredSess();
+  const agents=[...new Set(SESS.map(s=>s.agent).filter(Boolean))].sort();
+  $('sess-count').textContent=data.length+' sessions';
+  $('sess-agent').innerHTML='<option value="all">All agents</option>'+agents.map(a=>`<option value="${a}"${sAgent===a?' selected':''}>${a}</option>`).join('');
+  $('sess-head').innerHTML=th(sessCols(),sSort);
+  $('sess-body').innerHTML=data.map(s=>`<tr onclick="showDetail('${s.id}')">
+    <td>${esc(s.title.slice(0,48))}</td><td>${srcB(s.source)}</td><td><code>${s.agent||'—'}</code></td>
+    <td title="${esc(s.cwd)}"><code>${s.cwdShort||'—'}</code></td><td>${meter(s.contextPct)}</td>
+    <td>${s.messages||'—'}</td><td style="color:var(--text-dim)">${ago(s.updatedAt)}</td><td>${copyBtn('cd '+(s.cwd||'~')+' && kiro-cli chat --resume-id '+s.id)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">No sessions match.</td></tr>';
+}
 async function renderSessions(){
-  const p=new URLSearchParams({sort:sSort});if(sSrc!=='all')p.set('source',sSrc);if(sQ)p.set('q',sQ);
-  const data=await api('/api/sessions?'+p);
+  if(!SESS.length)await loadSessions();
   app.innerHTML=`
   <div class="toolbar">
-    <select onchange="sSrc=this.value;renderSessions()"><option value="all">All sources</option><option value="terminal"${sSrc==='terminal'?' selected':''}>Terminal</option><option value="slack"${sSrc==='slack'?' selected':''}>Slack</option></select>
-    <select onchange="sSort=this.value;renderSessions()"><option value="updated"${sSort==='updated'?' selected':''}>Last active</option><option value="messages"${sSort==='messages'?' selected':''}>Messages</option><option value="context"${sSort==='context'?' selected':''}>Context %</option></select>
-    <input placeholder="Search…" value="${esc(sQ)}" oninput="sQ=this.value;clearTimeout(this._t);this._t=setTimeout(renderSessions,300)">
-    <span class="count">${data.length} sessions</span>
+    <span class="field">${svg(ic.filter)}<select onchange="sSrc=this.value;paintSessions()"><option value="all">All sources</option><option value="terminal"${sSrc==='terminal'?' selected':''}>Terminal</option><option value="slack"${sSrc==='slack'?' selected':''}>Slack</option></select></span>
+    <span class="field">${svg(ic.dash)}<select id="sess-agent" onchange="sAgent=this.value;paintSessions()"></select></span>
+    <span class="field">${svg(ic.search)}<input class="search" placeholder="Search title or path…" value="${esc(sQ)}" oninput="sQ=this.value;clearTimeout(this._t);this._t=setTimeout(paintSessions,200)"></span>
+    <span class="count" id="sess-count"></span>
   </div>
-  <div class="table-wrap anim"><table><thead><tr><th>Title</th><th>Source</th><th>Agent</th><th>Dir</th><th>Context</th><th>Msgs</th><th>Active</th><th></th></tr></thead><tbody>
-  ${data.map(s=>`<tr onclick="showDetail('${s.id}')"><td>${esc(s.title.slice(0,45))}</td><td>${srcB(s.source)}</td><td><code>${s.agent||'—'}</code></td><td title="${esc(s.cwd)}"><code>${s.cwdShort||'—'}</code></td><td>${meterHtml(s.contextPct)}</td><td>${s.messages||'—'}</td><td style="color:var(--text-dim)">${ago(s.updatedAt)}</td><td><button class="copy-btn" onclick="event.stopPropagation();${copyFn('cd '+(s.cwd||'~')+' && kiro-cli chat --resume-id '+s.id)}">copy</button></td></tr>`).join('')||'<tr><td colspan="8" class="empty">No sessions found.</td></tr>'}
+  <div class="table-wrap"><table><thead id="sess-head"></thead><tbody id="sess-body"></tbody></table></div>`;
+  paintSessions();
+}
+
+// ── DASHBOARD ──
+async function renderDash(){
+  const d=await api('/api/status');if(!SESS.length)await loadSessions();
+  const recent=sortData(SESS,'updatedAt','desc','num').slice(0,10);
+  app.innerHTML=`
+  <div class="grid-3" style="margin-bottom:1.75rem">
+    <div class="card"><div class="card-label">Bridge</div><div class="card-value"><span class="dot ${d.bridge.running?'dot-on':'dot-off'}"></span>${d.bridge.running?'Online':'Offline'}</div><div class="card-sub">${d.bridge.pid?'PID '+d.bridge.pid:'—'}</div></div>
+    <div class="card"><div class="card-label">Sessions</div><div class="card-value">${d.sessions}</div><div class="card-sub">across all sources</div></div>
+    <div class="card"><div class="card-label">Slack Threads</div><div class="card-value">${d.threads}</div><div class="card-sub">active conversations</div></div>
+  </div>
+  <div class="sec-title">Recent Activity</div>
+  <div class="table-wrap"><table><thead><tr><th>Session</th><th>Source</th><th>Agent</th><th>Dir</th><th>Context</th><th>Active</th></tr></thead><tbody>
+  ${recent.map(s=>`<tr onclick="showDetail('${s.id}')"><td>${esc(s.title.slice(0,44))}</td><td>${srcB(s.source)}</td><td><code>${s.agent||'—'}</code></td><td><code>${s.cwdShort||'—'}</code></td><td>${meter(s.contextPct)}</td><td style="color:var(--text-dim)">${ago(s.updatedAt)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 
-async function showDetail(id){
-  curView='detail';setNav();const d=await api('/api/sessions/'+id);
-  app.innerHTML=`
-  <span class="back" onclick="go('sessions')">← Sessions</span>
-  <h2 style="font-size:1.2rem;margin-bottom:1.25rem;font-weight:600">${esc(d.title)}</h2>
-  <div class="detail-grid anim">
+// ── DETAIL ──
+async function showDetail(id){curView='detail';setNav();const d=await api('/api/sessions/'+id);
+  app.innerHTML=`<span class="back" onclick="go('sessions')">${svg(ic.back)}Sessions</span>
+  <h2 style="font-size:1.15rem;margin-bottom:1.2rem;font-weight:600">${esc(d.title)}</h2>
+  <div class="detail-grid">
     <div class="detail-item"><div class="label">Source</div><div class="val">${srcB(d.source)}</div></div>
     <div class="detail-item"><div class="label">Agent</div><div class="val"><code>${d.agent||'default'}</code></div></div>
     <div class="detail-item"><div class="label">Model</div><div class="val"><code>${d.model||'auto'}</code></div></div>
-    <div class="detail-item"><div class="label">Context</div><div class="val">${meterHtml(d.contextPct)}</div></div>
+    <div class="detail-item"><div class="label">Context</div><div class="val">${meter(d.contextPct)}</div></div>
     <div class="detail-item"><div class="label">Messages</div><div class="val">${d.messages}</div></div>
-    <div class="detail-item"><div class="label">Directory</div><div class="val"><code style="font-size:.72rem">${esc(d.cwd||'~')}</code></div></div>
+    <div class="detail-item"><div class="label">Directory</div><div class="val"><code style="font-size:.7rem">${esc(d.cwd||'~')}</code></div></div>
     <div class="detail-item"><div class="label">Created</div><div class="val">${ago(d.createdAt)} ago</div></div>
-    <div class="detail-item"><div class="label">Last Active</div><div class="val">${ago(d.updatedAt)} ago</div></div>
+    <div class="detail-item"><div class="label">Active</div><div class="val">${ago(d.updatedAt)} ago</div></div>
   </div>
-  <div class="resume-box anim anim-d1"><code>${esc(d.resumeCmd)}</code><button class="btn btn-accent" onclick="${copyFn(d.resumeCmd)}">copy</button></div>
-  ${d.preview&&d.preview.total?`<div class="card anim anim-d2"><div class="card-label">Conversation · ${d.preview.total} messages</div><div class="log">${[...(d.preview.first||[]),...(d.preview.last||[])].map(m=>esc(JSON.stringify(m).slice(0,220))).join('\n')}</div></div>`:''}`;
+  <div class="resume-box"><code>${esc(d.resumeCmd)}</code><button class="btn btn-accent" onclick="navigator.clipboard.writeText(\`${d.resumeCmd.replace(/`/g,'\\`')}\`);this.textContent='✓ copied';setTimeout(()=>this.textContent='copy command',1200)">copy command</button></div>
+  ${d.preview&&d.preview.total?`<div class="sec-title">Conversation · ${d.preview.total} messages</div><div class="log">${[...(d.preview.first||[]),...(d.preview.last||[])].map(m=>esc(JSON.stringify(m).slice(0,220))).join('\n')}</div>`:''}`;
 }
 
-let logF='';
+// ── BRIDGE ──
+let TH=[],tSort={key:'lastActive',dir:'desc'},logF='';
+function threadCols(){return[{key:'title',label:'Thread'},{key:'messages',label:'Msgs',type:'num'},{key:'lastActive',label:'Active'},{label:''}]}
+function paintThreads(){
+  const type=tSort.key==='messages'?'num':'str';
+  const data=sortData(TH,tSort.key,tSort.dir,type);
+  $('th-count').textContent=data.length;
+  $('th-head').innerHTML=th(threadCols(),tSort);
+  $('th-body').innerHTML=data.length?data.map(t=>`<tr>
+    <td><div class="thread-title">${esc(t.title)||'<span style="opacity:.3">Untitled</span>'}</div><div class="thread-meta">${t.agent||'main'} · ${t.cwdShort||'—'}</div></td>
+    <td>${t.messages||'—'}</td><td style="color:var(--text-dim)">${ago(t.lastActive)}</td>
+    <td>${t.sessionId?copyBtn('cd '+(t.cwd||'~')+' && kiro-cli chat --resume-id '+t.sessionId):''}</td></tr>`).join(''):'<tr><td colspan="4" class="empty">No active threads</td></tr>';
+}
+function onSortTh(key,type){if(tSort.key===key)tSort.dir=tSort.dir==='asc'?'desc':'asc';else tSort={key,dir:type==='num'?'desc':'asc'};paintThreads()}
 async function renderBridge(){
-  const st=await api('/api/status');const th=await api('/api/bridge/threads');const lg=await api('/api/bridge/logs?n=60&filter='+encodeURIComponent(logF));
+  const st=await api('/api/status');TH=await api('/api/bridge/threads');const lg=await api('/api/bridge/logs?n=60&filter='+encodeURIComponent(logF));
   app.innerHTML=`
-  <div class="card anim" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
-    <span class="dot ${st.bridge.running?'dot-on':'dot-off'}"></span>
-    <span style="font-weight:600">${st.bridge.running?'Online':'Offline'}</span>
-    ${st.bridge.pid?`<span style="color:var(--text-dim);font-size:.8rem">PID ${st.bridge.pid}</span>`:''}
+  <div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
+    <span class="dot ${st.bridge.running?'dot-on':'dot-off'}"></span><span style="font-weight:600">${st.bridge.running?'Online':'Offline'}</span>
+    ${st.bridge.pid?`<code>PID ${st.bridge.pid}</code>`:''}
     <div style="margin-left:auto;display:flex;gap:.5rem">
-      <button class="btn" onclick="bCmd('start')">▶ Start</button>
-      <button class="btn" onclick="bCmd('stop')">⏹ Stop</button>
-      <button class="btn" onclick="bCmd('restart')">↻ Restart</button>
+      <button class="btn" onclick="bCmd('start')">${svg(ic.play)}Start</button>
+      <button class="btn" onclick="bCmd('stop')">${svg(ic.stop)}Stop</button>
+      <button class="btn" onclick="bCmd('restart')">${svg(ic.restart)}Restart</button>
     </div>
   </div>
-  <div class="card anim anim-d1" style="margin-bottom:1.5rem"><div class="card-label">Active Slack Threads · ${th.length}</div>
-  ${th.length?th.map(t=>`<div class="thread">
-    <div><div class="thread-title">${esc(t.title)||'<span style="opacity:.3">Untitled</span>'}</div><div class="thread-meta">${t.agent||'main'} · ${t.cwdShort||'—'}${t.messages?' · '+t.messages+' msgs':''}</div></div>
-    <div style="font-size:.72rem;color:var(--text-dim)">${ago(t.lastActive)}</div>
-    <div>${t.sessionId?`<button class="copy-btn" onclick="${copyFn('cd '+(t.cwd||'~')+' && kiro-cli chat --resume-id '+t.sessionId)}">copy</button>`:''}</div>
-  </div>`).join(''):'<div class="empty">No active threads</div>'}</div>
-  <div class="card anim anim-d2"><div class="card-label">Logs</div>
-    <div style="display:flex;gap:.5rem;margin-bottom:.75rem"><input style="flex:1;font-family:var(--font-mono);font-size:.75rem;padding:.4rem .6rem;background:var(--surface-up);border:1px solid var(--border);border-radius:6px;color:var(--text)" placeholder="Filter logs…" value="${esc(logF)}" oninput="logF=this.value;clearTimeout(this._t);this._t=setTimeout(refLog,400)"><button class="btn" onclick="refLog()">↻</button></div>
-    <div class="log" id="logbox">${lg.lines.map(esc).join('\n')}</div>
-  </div>`;
+  <div class="sec-title">Active Slack Threads · <span id="th-count"></span></div>
+  <div class="table-wrap" style="margin-bottom:1.5rem"><table><thead id="th-head"></thead><tbody id="th-body"></tbody></table></div>
+  <div class="sec-title">Logs</div>
+  <div class="toolbar"><span class="field" style="flex:1">${svg(ic.search)}<input class="search" style="width:100%" placeholder="Filter logs…" value="${esc(logF)}" oninput="logF=this.value;clearTimeout(this._t);this._t=setTimeout(refLog,350)"></span></div>
+  <div class="log" id="logbox">${lg.lines.map(esc).join('\n')}</div>`;
+  window.onSort=onSortTh;paintThreads();
 }
-async function refLog(){const l=await api('/api/bridge/logs?n=60&filter='+encodeURIComponent(logF));const b=$('logbox');if(b)b.innerHTML=l.lines.map(esc).join('\n');}
-async function bCmd(c){await api('/api/bridge/'+c,true);setTimeout(renderBridge,2500);}
+async function refLog(){const l=await api('/api/bridge/logs?n=60&filter='+encodeURIComponent(logF));const b=$('logbox');if(b)b.innerHTML=l.lines.map(esc).join('\n')}
+async function bCmd(c){await api('/api/bridge/'+c,true);setTimeout(renderBridge,2500)}
 
-function setNav(){document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));const n=$('n-'+(curView==='detail'?'sessions':curView));if(n)n.classList.add('active');}
-function go(v){curView=v;setNav();if(v==='dash')renderDash();else if(v==='sessions')renderSessions();else if(v==='bridge')renderBridge();}
+function go(v){curView=v;setNav();window.onSort=onSort;
+  if(v==='dash')renderDash();else if(v==='sessions')renderSessions();else if(v==='bridge')renderBridge();}
 go('dash');
 </script>
 </body>
