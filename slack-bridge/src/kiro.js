@@ -138,11 +138,14 @@ function recentSessions(limit = 8) {
         cwd: d.cwd || null,
         agent: (d.session_state || {}).agent_name || null,
         updatedAt: d.updated_at || null,
+        locked: false,
       });
     } catch { /* skip bad file */ }
   }
   items.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-  return items.slice(0, limit);
+  const top = items.slice(0, limit);
+  for (const s of top) s.locked = !!sessionLock(s.id);
+  return top;
 }
 
 // Look up a single session by id → { id, title, cwd, agent } or null.
@@ -150,6 +153,15 @@ function getSessionInfo(id) {
   try {
     const d = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, `${id}.json`), 'utf8'));
     return { id: d.session_id, title: d.title || '', cwd: d.cwd || null, agent: (d.session_state || {}).agent_name || null };
+  } catch { return null; }
+}
+
+// If a session is currently open in another live process, return that pid; else null.
+function sessionLock(id) {
+  try {
+    const pid = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, `${id}.lock`), 'utf8')).pid;
+    if (!pid) return null;
+    try { process.kill(pid, 0); return pid; } catch { return null; } // ESRCH => stale lock, treat as free
   } catch { return null; }
 }
 
@@ -166,4 +178,4 @@ function listModels() {
   });
 }
 
-module.exports = { runKiro, listSessions, getLatestSessionId, listAgents, recentSessions, getSessionInfo, listModels };
+module.exports = { runKiro, listSessions, getLatestSessionId, listAgents, recentSessions, getSessionInfo, sessionLock, listModels };

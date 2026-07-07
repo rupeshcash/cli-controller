@@ -10,7 +10,7 @@ require('dotenv').config();
 const os = require('os');
 const path = require('path');
 const { App } = require('@slack/bolt');
-const { runKiro, listSessions, listAgents, recentSessions, getSessionInfo, listModels } = require('./kiro');
+const { runKiro, listSessions, listAgents, recentSessions, getSessionInfo, sessionLock, listModels } = require('./kiro');
 const store = require('./sessions');
 const { chunk } = require('./chunk');
 const { stripToolTrace, toSlack } = require('./format');
@@ -333,13 +333,14 @@ async function handleMessage({ message, say, client }) {
     const n = Math.min(parseInt(text.split(/\s+/)[1], 10) || 8, 20);
     const items = recentSessions(n);
     if (!items.length) return say({ thread_ts: rootTs, text: 'No sessions found.' });
-    const body = items.map((s, i) => `*${i + 1}.* ${s.title}\n   \`${s.id}\`\n   ${s.agent || 'main'} · \`${s.cwd ? path.basename(s.cwd) : '~'}\` · ${rel(s.updatedAt)}`).join('\n\n');
-    return say({ thread_ts: rootTs, text: `*Recent Kiro sessions* (${items.length}):\n\n${body}\n\n_Continue any of them here with_ \`!teleport <sessionId>\`` });
+    const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title}\n   \`${s.id}\`\n   ${s.agent || 'main'} · \`${s.cwd ? path.basename(s.cwd) : '~'}\` · ${rel(s.updatedAt)}`).join('\n\n');
+    return say({ thread_ts: rootTs, text: `*Recent Kiro sessions* (${items.length}):\n\n${body}\n\n_Continue any of them here with_ \`!teleport <sessionId>\`  ·  :lock: = currently open elsewhere` });
   }
   if (lower.startsWith('!teleport')) {
     const id = (text.split(/\s+/)[1] || '').trim();
     if (!id) return say({ thread_ts: rootTs, text: 'Usage: `!teleport <sessionId>` — pull any Kiro session into a Slack thread. See `!recent`.' });
     const info = getSessionInfo(id);
+    const lockPid = sessionLock(id);
     store.set(threadKey, {
       cwd: (info && info.cwd) || DEFAULT_CWD,
       agent: (info && info.agent) || DEFAULT_AGENT,
@@ -351,7 +352,10 @@ async function handleMessage({ message, say, client }) {
     const meta = info
       ? `${info.title ? `*${info.title.slice(0, 70)}*\n` : ''}dir \`${path.basename(info.cwd || '~')}\` · agent \`${info.agent || 'main'}\``
       : '_(session file not found — using default dir; resume may start fresh)_';
-    return say({ thread_ts: rootTs, text: `🛸 *Teleported* \`${id.slice(0, 12)}…\` into this thread.\n${meta}\nReply here to continue this session.` });
+    const lockWarn = lockPid
+      ? `\n\n:warning: *This session is currently open in another process* (pid ${lockPid}) — likely a terminal/TUI. Continuing here at the same time will conflict and give stale replies. *Close it there first.*`
+      : '';
+    return say({ thread_ts: rootTs, text: `🛸 *Teleported* \`${id.slice(0, 12)}…\` into this thread.\n${meta}\nReply here to continue this session.${lockWarn}` });
   }
 
   // ── Quick aliases (e.g. !25-opus) → start a preset session ──
