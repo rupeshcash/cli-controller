@@ -39,7 +39,7 @@ function buildArgs({ sessionId, agent, model, trustTools }) {
 }
 
 // Run one headless turn. Resolves { ok, output, error, code }. Never rejects.
-function runKiro({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs = 300000, onSpawn }) {
+function runKiro({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs = 300000, onSpawn, onData }) {
   return new Promise((resolve) => {
     let child;
     try {
@@ -66,7 +66,7 @@ function runKiro({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs =
       ? setTimeout(() => { killedByTimeout = true; child.kill('SIGTERM'); }, timeoutMs)
       : null;
 
-    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.stdout.on('data', (d) => { const s = d.toString(); out += s; if (typeof onData === 'function') { try { onData(s); } catch {} } });
     child.stderr.on('data', (d) => { err += d.toString(); });
     child.on('error', (e) => {
       clearTimeout(timer);

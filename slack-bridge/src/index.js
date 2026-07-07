@@ -76,6 +76,21 @@ const app = new App({
 
 // threadKey ("channel:rootTs") -> running child process (abort + single-flight per thread)
 const running = new Map();
+// threadKey -> { startedAt, buf } live output of the in-flight run (for !peek)
+const progress = new Map();
+
+function ansiStrip(s) { return (s || '').replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '').replace(/\r/g, '\n'); }
+function livePeek(threadKey) {
+  const p = progress.get(threadKey);
+  if (!p) return null;
+  const secs = Math.floor((Date.now() - p.startedAt) / 1000);
+  const mins = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+  const tail = ansiStrip(p.buf).replace(/\n{3,}/g, '\n\n').trim().slice(-1600);
+  if (tail) return `⏳ *Running ${mins}* — latest activity:\n\`\`\`\n${tail}\n\`\`\``;
+  // Kiro buffers output until the turn completes (not a TTY), so mid-run content
+  // usually isn't available yet — report liveness instead.
+  return `⏳ *Kiro is still working — ${mins} elapsed.*\nOutput arrives when the turn completes. Send \`!abort\` to cancel.`;
+}
 // threadKeys whose current run was aborted — suppresses output from the dying process.
 const aborted = new Set();
 
@@ -106,7 +121,7 @@ function helpText() {
     '*Override at start*',
     '`!new [agent=<name>] [dir=<path|workspace>] [model=<name>] <task>`',
     '',
-    '*In a thread*   `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!verbose` · `!clear` · `!end`',
+    '*In a thread*   `!peek` · `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!verbose` · `!clear` · `!end`',
     '',
     '_Replies are *verbose* by default (full tool trace). Add `-q` to `!new`, or `!verbose` in a thread, to toggle quiet mode (answer only)._',
     '*Anywhere*   `!help` · `!agents` · `!models` · `!recent [n]` · `!teleport <sessionId>`',
@@ -206,15 +221,20 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
 
   const beforeIds = isFresh ? new Set((await listSessions(st.cwd)).map((s) => s.sessionId)) : new Set();
 
+  const prog = { startedAt: Date.now(), buf: '' };
+  progress.set(threadKey, prog);
+  const onData = (c) => { prog.buf += c; if (prog.buf.length > 24000) prog.buf = prog.buf.slice(-24000); };
+
   let res = await runKiro({
     cwd: st.cwd, sessionId: st.sessionId, agent: st.agent, model: st.model,
-    trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c),
+    trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
   });
   running.delete(threadKey);
 
   // If this run was aborted, suppress all output — user already got the abort ack.
   if (aborted.has(threadKey)) {
     aborted.delete(threadKey);
+    progress.delete(threadKey);
     if (reactedOk) await unreact(client, channel, reactTs, 'hourglass_flowing_sand');
     console.log(`[turn aborted] ${threadKey} — suppressing output`);
     return;
@@ -226,7 +246,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
     const before2 = new Set((await listSessions(st.cwd)).map((s) => s.sessionId));
     res = await runKiro({
       cwd: st.cwd, sessionId: null, agent: st.agent, model: st.model,
-      trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c),
+      trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
     });
     running.delete(threadKey);
     if (res.ok) { const sid = await captureNewSession(st.cwd, before2); if (sid) store.set(threadKey, { sessionId: sid }); }
@@ -234,6 +254,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
     const sid = await captureNewSession(st.cwd, beforeIds);
     if (sid) store.set(threadKey, { sessionId: sid });
   }
+  progress.delete(threadKey);
 
   // Finalize status reaction.
   if (reactedOk) {
@@ -345,7 +366,13 @@ async function handleMessage({ message, say, client }) {
           }, 3000);
           return say({ thread_ts: rootTs, text: '🛑 Aborted. You can send a new message now.' });
         }
+        case 'peek': {
+          const live = livePeek(threadKey);
+          return say({ thread_ts: rootTs, text: live || 'Nothing is running in this thread. Send a message to start.' });
+        }
         case 'status': {
+          const live = livePeek(threadKey);
+          if (live) return say({ thread_ts: rootTs, text: live });
           const st = store.get(threadKey);
           let turns = '';
           if (st.sessionId) {
@@ -354,7 +381,7 @@ async function handleMessage({ message, say, client }) {
               if (s) turns = `\n• turns: \`${s.messageCount}\``;
             } catch (e) { /* ignore */ }
           }
-          return say({ thread_ts: rootTs, text: `*Session*\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• verbose: \`${st.verbose ? 'on' : 'off'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
+          return say({ thread_ts: rootTs, text: `*Session* (idle)\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• verbose: \`${st.verbose ? 'on' : 'off'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
         }
         case 'model':
           if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!model <name>` (or `!model clear`)' });
@@ -379,7 +406,7 @@ async function handleMessage({ message, say, client }) {
           return say({ thread_ts: rootTs, text: on ? '🗣️ Verbose ON — full tool trace shown for this session.' : '🤫 Verbose OFF — answers only (default).' });
         }
         default:
-          return say({ thread_ts: rootTs, text: 'In a thread: `!status`, `!abort`, `!model <name>`, `!agent <name>`, `!verbose`, `!clear`, `!end`. Anything else is a prompt.' });
+          return say({ thread_ts: rootTs, text: 'In a thread: `!peek`, `!status`, `!abort`, `!model <name>`, `!agent <name>`, `!verbose`, `!clear`, `!end`. Anything else is a prompt.' });
       }
     }
     return runTurn({ threadKey, thread_ts: rootTs, reactTs: message.ts, channel, prompt: text, say, client });
