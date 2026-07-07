@@ -5,6 +5,8 @@
 **/macos-ca.pem
 **/bridge.log
 **/bridge.pid
+**/panel.log
+**/panel.pid
 **/*.log
 # deps
 node_modules/

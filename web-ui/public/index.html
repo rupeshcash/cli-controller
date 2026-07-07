@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kiro Control Panel</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+<style>
+:root{--pico-font-size:15px}
+body{max-width:1100px;margin:0 auto;padding:1rem 1.5rem}
+nav{margin-bottom:1.5rem;display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap}
+nav a{cursor:pointer;text-decoration:none;opacity:.7;transition:opacity .2s}
+nav a.active,nav a:hover{opacity:1;text-decoration:underline}
+.logo{font-weight:700;font-size:1.1rem;opacity:1!important;text-decoration:none!important}
+.badge{display:inline-block;padding:.15em .5em;border-radius:4px;font-size:.75rem;font-weight:600;vertical-align:middle}
+.badge-green{background:#2d6a4f;color:#b7e4c7}.badge-red{background:#6a2d2d;color:#e4b7b7}
+.badge-blue{background:#1d3557;color:#a8dadc}.badge-gray{background:#333;color:#aaa}
+.card{border:1px solid var(--pico-muted-border-color);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem}
+.card h3{margin:0 0 .5rem}
+.stat{font-size:2rem;font-weight:700;line-height:1}
+.stat small{font-size:.85rem;font-weight:400;opacity:.7;display:block;margin-top:.25rem}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}
+table{font-size:.85rem}
+.mono{font-family:monospace;font-size:.8rem;word-break:break-all}
+.copy-btn{cursor:pointer;background:none;border:1px solid var(--pico-muted-border-color);border-radius:4px;padding:.2em .5em;font-size:.75rem}
+.copy-btn:hover{background:var(--pico-primary-focus)}
+.filter-bar{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center}
+.filter-bar select,.filter-bar input{padding:.3rem .5rem;font-size:.8rem;min-width:120px}
+pre.log{background:#111;color:#ccc;padding:.75rem;border-radius:6px;max-height:400px;overflow:auto;font-size:.75rem;line-height:1.4}
+.ctx-bar{display:inline-block;width:60px;height:8px;background:#333;border-radius:4px;overflow:hidden;vertical-align:middle}
+.ctx-fill{height:100%;background:#4ecdc4;border-radius:4px}
+.empty{opacity:.5;font-style:italic;padding:2rem;text-align:center}
+#detail{display:none}
+.back{cursor:pointer;opacity:.7;font-size:.85rem}
+.back:hover{opacity:1}
+</style>
+</head>
+<body>
+<nav>
+  <span class="logo">⚡ Kiro Panel</span>
+  <a onclick="go('dash')" id="nav-dash">Dashboard</a>
+  <a onclick="go('sessions')" id="nav-sessions">Sessions</a>
+  <a onclick="go('bridge')" id="nav-bridge">Bridge</a>
+</nav>
+<main id="app"></main>
+
+<script>
+const $=id=>document.getElementById(id);const app=$('app');
+let currentView='dash';
+const api=async(u,m)=>{const r=await fetch(u,m?{method:'POST'}:undefined);return r.json()};
+const ago=d=>{if(!d)return'—';const s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'};
+const esc=s=>(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const ctxBar=pct=>pct!=null?`<span class="ctx-bar"><span class="ctx-fill" style="width:${pct}%"></span></span> ${pct}%`:'—';
+const srcBadge=s=>s==='slack'?'<span class="badge badge-blue">💬 Slack</span>':'<span class="badge badge-gray">🖥 Terminal</span>';
+const copyBtn=(txt,label='📋')=>`<button class="copy-btn" onclick="navigator.clipboard.writeText('${txt.replace(/'/g,"\\'")}');this.textContent='✓';setTimeout(()=>this.textContent='${label}',1500)">${label}</button>`;
+
+async function renderDash(){
+  const d=await api('/api/status');
+  const bStatus=d.bridge.running?'<span class="badge badge-green">● Running</span>':'<span class="badge badge-red">● Stopped</span>';
+  app.innerHTML=`
+  <div class="grid3">
+    <div class="card"><div class="stat">${bStatus}<small>Slack Bridge</small></div></div>
+    <div class="card"><div class="stat">${d.sessions}<small>Total Sessions</small></div></div>
+    <div class="card"><div class="stat">${d.threads}<small>Active Threads</small></div></div>
+  </div>
+  <div class="card"><h3>Recent Sessions</h3><div id="recent">Loading…</div></div>`;
+  const s=await api('/api/sessions?sort=updated');
+  $('recent').innerHTML=s.slice(0,8).map(x=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--pico-muted-border-color)">
+      <div><a onclick="showDetail('${x.id}')" style="cursor:pointer">${esc(x.title.slice(0,60))}</a><br><small>${srcBadge(x.source)} <code>${x.agent||'—'}</code> · ${x.cwdShort||'—'}</small></div>
+      <div style="text-align:right;font-size:.8rem">${ctxBar(x.contextPct)}<br><small>${ago(x.updatedAt)}</small></div>
+    </div>`).join('')||'<p class="empty">No sessions yet.</p>';
+}
+
+let sessionData=[];
+async function renderSessions(){
+  const params=new URLSearchParams();
+  const source=$('f-source')?.value;const agent=$('f-agent')?.value;const q=$('f-q')?.value;
+  if(source&&source!=='all')params.set('source',source);
+  if(agent)params.set('agent',agent);
+  if(q)params.set('q',q);
+  sessionData=await api('/api/sessions?'+params);
+  const rows=sessionData.map(x=>`<tr>
+    <td><a onclick="showDetail('${x.id}')" style="cursor:pointer">${esc(x.title.slice(0,55))}</a></td>
+    <td>${srcBadge(x.source)}</td>
+    <td><code>${x.agent||'—'}</code></td>
+    <td title="${esc(x.cwd)}">${x.cwdShort||'—'}</td>
+    <td>${ctxBar(x.contextPct)}</td>
+    <td>${x.messages}</td>
+    <td>${ago(x.updatedAt)}</td>
+    <td>${copyBtn('cd '+(x.cwd||'~')+' && kiro-cli chat --resume-id '+x.id)}</td>
+  </tr>`).join('');
+  app.innerHTML=`
+  <div class="filter-bar">
+    <select id="f-source" onchange="renderSessions()"><option value="all">All sources</option><option value="terminal">🖥 Terminal</option><option value="slack">💬 Slack</option></select>
+    <input id="f-q" placeholder="Search…" oninput="renderSessions()" value="${esc(q||'')}">
+    <small style="opacity:.6">${sessionData.length} sessions</small>
+  </div>
+  <table><thead><tr><th>Title</th><th>Source</th><th>Agent</th><th>Dir</th><th>Context</th><th>Msgs</th><th>Last</th><th></th></tr></thead>
+  <tbody>${rows||'<tr><td colspan="8" class="empty">No sessions found.</td></tr>'}</tbody></table>`;
+  if(source)$('f-source').value=source;
+}
+
+async function showDetail(id){
+  currentView='detail';setNav();
+  const d=await api('/api/sessions/'+id);
+  app.innerHTML=`
+  <p class="back" onclick="go('sessions')">← Sessions</p>
+  <div class="card">
+    <h3>${esc(d.title)}</h3>
+    <p>${srcBadge(d.source)} <code>${d.agent||'default'}</code> · <code>${d.model||'auto'}</code> · ${ctxBar(d.contextPct)} · ${d.messages} msgs</p>
+    <p><strong>Dir:</strong> <code>${esc(d.cwd||'~')}</code></p>
+    <p><strong>Created:</strong> ${d.createdAt||'—'} · <strong>Updated:</strong> ${ago(d.updatedAt)}</p>
+    <p><strong>Resume:</strong></p>
+    <pre class="mono">${esc(d.resumeCmd)}</pre>
+    ${copyBtn(d.resumeCmd,'📋 Copy command')}
+  </div>
+  ${d.preview&&d.preview.total?`<div class="card"><h3>Conversation preview</h3><small>${d.preview.total} messages total — showing first/last</small>
+    <pre class="log">${(d.preview.first||[]).map(m=>esc(JSON.stringify(m).slice(0,300))).join('\n')}\n…\n${(d.preview.last||[]).map(m=>esc(JSON.stringify(m).slice(0,300))).join('\n')}</pre>
+  </div>`:''}`;
+}
+
+async function renderBridge(){
+  const st=await api('/api/status');
+  const threads=await api('/api/bridge/threads');
+  const logs=await api('/api/bridge/logs?n=60');
+  const bStatus=st.bridge.running?'<span class="badge badge-green">● Running</span> PID '+st.bridge.pid:'<span class="badge badge-red">● Stopped</span>';
+  app.innerHTML=`
+  <div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <div>${bStatus}</div>
+    <button onclick="bridgeAction('start')">▶ Start</button>
+    <button onclick="bridgeAction('stop')">⏹ Stop</button>
+    <button onclick="bridgeAction('restart')">🔄 Restart</button>
+  </div>
+  <div class="card"><h3>Active Slack Threads (${threads.length})</h3>
+  ${threads.length?`<table><thead><tr><th>Thread</th><th>Session</th><th>Dir</th><th>Agent</th></tr></thead><tbody>
+  ${threads.map(t=>`<tr><td class="mono">${t.key.split(':')[1]||t.key}</td><td class="mono">${(t.sessionId||'—').slice(0,12)}</td><td>${t.cwdShort||path_base(t.cwd)}</td><td>${t.agent||'—'}</td></tr>`).join('')}
+  </tbody></table>`:'<p class="empty">No active threads.</p>'}</div>
+  <div class="card"><h3>Logs</h3><pre class="log" id="logbox">${logs.lines.map(esc).join('\n')}</pre></div>`;
+}
+function path_base(p){return p?p.split('/').pop():'—'}
+async function bridgeAction(cmd){await api('/api/bridge/'+cmd,true);setTimeout(()=>renderBridge(),2000);}
+
+function setNav(){document.querySelectorAll('nav a').forEach(a=>a.classList.remove('active'));const n=$('nav-'+currentView);if(n)n.classList.add('active');}
+function go(view){currentView=view;setNav();if(view==='dash')renderDash();else if(view==='sessions')renderSessions();else if(view==='bridge')renderBridge();}
+go('dash');
+</script>
+</body>
+</html>
