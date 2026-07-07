@@ -44,6 +44,19 @@ const DIR_ALIASES = (process.env.KIRO_DIR_ALIASES || '')
 function expandHome(p) { return p && p.startsWith('~') ? p.replace(/^~/, os.homedir()) : p; }
 function resolveDir(v) { return expandHome(DIR_ALIASES[v] || v); }
 
+// Quick aliases: KIRO_QUICK_ALIASES="name:dir|model|agent, name2:dir|model"
+// e.g. 25-opus:~/Documents/armorcode-2025|claude-opus-4.8|main
+const QUICK_ALIASES = (process.env.KIRO_QUICK_ALIASES || '')
+  .split(',').map((s) => s.trim()).filter(Boolean)
+  .reduce((acc, entry) => {
+    const i = entry.indexOf(':');
+    if (i < 0) return acc;
+    const name = entry.slice(0, i).trim().toLowerCase();
+    const [cwd, model, agent] = entry.slice(i + 1).split('|').map((x) => (x || '').trim());
+    if (name && cwd) acc[name] = { cwd: expandHome(cwd), model: model || DEFAULT_MODEL, agent: agent || DEFAULT_AGENT };
+    return acc;
+  }, {});
+
 // ── Startup validation (before App construction) ──────────────────────────────
 {
   const missing = [];
@@ -97,6 +110,7 @@ function helpText() {
     '',
     '_Replies are *verbose* by default (full tool trace). Add `-q` to `!new`, or `!verbose` in a thread, to toggle quiet mode (answer only)._',
     '*Anywhere*   `!help` · `!agents` · `!models` · `!recent [n]` · `!teleport <sessionId>`',
+    Object.keys(QUICK_ALIASES).length ? `*Quick starts*   ${Object.keys(QUICK_ALIASES).map((a) => '`!' + a + '`').join(' · ')}` : '',
     '',
     '*Status*   :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
   ].join('\n');
@@ -298,6 +312,15 @@ async function handleMessage({ message, say, client }) {
       ? `${info.title ? `*${info.title.slice(0, 70)}*\n` : ''}dir \`${path.basename(info.cwd || '~')}\` · agent \`${info.agent || 'main'}\``
       : '_(session file not found — using default dir; resume may start fresh)_';
     return say({ thread_ts: rootTs, text: `🛸 *Teleported* \`${id.slice(0, 12)}…\` into this thread.\n${meta}\nReply here to continue this session.` });
+  }
+
+  // ── Quick aliases (e.g. !25-opus) → start a preset session ──
+  const cmd0 = lower.split(/\s+/)[0];
+  if (cmd0.startsWith('!') && QUICK_ALIASES[cmd0.slice(1)]) {
+    const q = QUICK_ALIASES[cmd0.slice(1)];
+    const prompt = text.split(/\s+/).slice(1).join(' ').trim();
+    const rid = message.ts;
+    return startSession({ threadKey: `${channel}:${rid}`, rootTs: rid, reactTs: rid, channel, patch: { cwd: q.cwd, model: q.model, agent: q.agent }, prompt, say, client });
   }
 
   // ── Inside a thread → continue / control that session ──
