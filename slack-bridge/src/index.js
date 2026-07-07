@@ -97,38 +97,44 @@ const aborted = new Set();
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function helpText() {
   const aliasNames = Object.keys(DIR_ALIASES);
-  const workspaces = aliasNames.length
-    ? aliasNames.map((a) => `   • \`${a}\` → \`${expandHome(DIR_ALIASES[a])}\``).join('\n')
-    : '   _(none yet — set `KIRO_DIR_ALIASES` in .env)_';
+  const quickNames = Object.keys(QUICK_ALIASES);
   const ws = aliasNames.length ? aliasNames[0] : 'myrepo';
-  return [
-    ':robot_face: *Kiro Bridge* — drive Kiro from Slack',
+  const lines = [
+    ':zap: *Kiro Bridge* — run Kiro from Slack. Each thread = one Kiro session.',
     '',
-    '*How it works*',
-    '• Send *any message* → I start a session & reply in a :thread: *thread*',
-    '• *Reply in the thread* → the same session continues',
-    '• Each new top-level message → a separate, *parallel* session',
+    '━━ *How it works* ━━',
+    '• *Send any message* → starts a new session; I reply in a :thread: *thread*.',
+    '• *Reply inside that thread* → continues the same session (full context).',
+    '• Each new top-level message → a separate, *parallel* session.',
+    `• Defaults: agent \`${DEFAULT_AGENT}\` · dir \`${DEFAULT_CWD}\` · verbose on.`,
     '',
-    '*Quick start*',
-    '• `summarize the README here`   ← just type a task',
-    '• `!new ' + ws + ' run the unit tests`   ← start in a saved workspace',
-    '• `!new dir=~/path/to/repo fix the build`',
+    '━━ *Start a session* ━━',
+    '• `summarize the README here` — just type a task',
+    `• \`!new ${ws} run the unit tests\` — start in a saved workspace`,
+    '• `!new dir=~/path model=claude-opus-4.8 agent=main <task>` — full control',
+    '• `!new -q <task>` — quiet (answer only, no tool trace)',
+  ];
+  if (quickNames.length) lines.push(`• Quick starts: ${quickNames.map((a) => '`!' + a + '`').join(' · ')}`);
+  if (aliasNames.length) lines.push(`• Workspaces: ${aliasNames.map((a) => '`' + a + '`').join(' · ')}`);
+  lines.push(
     '',
-    `*Defaults*   agent \`${DEFAULT_AGENT}\` · dir \`${DEFAULT_CWD}\``,
-    '*Workspaces*   (use as `!new <name> <task>` or `dir=<name>`)',
-    workspaces,
+    '━━ *Inside a thread* ━━',
+    '• `!peek` / `!status` — is it still running? how long? / session info',
+    '• `!abort` — stop the current task',
+    '• `!model <name>` — switch model  ·  `!agent <name>` — switch agent',
+    '• `!verbose` — toggle full tool trace vs answer-only',
+    '• `!clear` — fresh session (same thread)  ·  `!end` — close session',
     '',
-    '*Override at start*',
-    '`!new [agent=<name>] [dir=<path|workspace>] [model=<name>] <task>`',
+    '━━ *Find & resume any session* ━━',
+    '• `!recent [n]` — list recent Kiro sessions (terminal *and* Slack)',
+    '• `!teleport <sessionId>` — pull any session into a thread & continue it',
     '',
-    '*In a thread*   `!peek` · `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!verbose` · `!clear` · `!end`',
+    '━━ *Info* ━━',
+    '• `!agents` — list agents  ·  `!models` — list models  ·  `!help` — this',
     '',
-    '_Replies are *verbose* by default (full tool trace). Add `-q` to `!new`, or `!verbose` in a thread, to toggle quiet mode (answer only)._',
-    '*Anywhere*   `!help` · `!agents` · `!models` · `!recent [n]` · `!teleport <sessionId>`',
-    Object.keys(QUICK_ALIASES).length ? `*Quick starts*   ${Object.keys(QUICK_ALIASES).map((a) => '`!' + a + '`').join(' · ')}` : '',
-    '',
-    '*Status*   :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
-  ].join('\n');
+    '_Status reactions:_ :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
+  );
+  return lines.filter((l) => l !== null).join('\n');
 }
 
 function parseNew(text) {
@@ -187,11 +193,24 @@ async function sendOutput({ client, say, channel, thread_ts, text, verbose }) {
 
 // Reactions (graceful: no-op if the reactions:write scope isn't granted).
 async function react(client, channel, ts, name) {
-  try { await client.reactions.add({ channel, timestamp: ts, name }); return true; }
-  catch (e) { return false; }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { await client.reactions.add({ channel, timestamp: ts, name }); return true; }
+    catch (e) {
+      const err = (e && e.data && e.data.error) || (e && e.message) || 'unknown';
+      if (err === 'already_reacted') return true;                 // reaction is already there — success
+      if (err === 'ratelimited' || (e && e.code === 'slack_webapi_platform_error' && err === 'ratelimited') || (e && e.code === 'slack_webapi_rate_limited_error')) {
+        await new Promise((r) => setTimeout(r, ((e && e.retryAfter) || 1) * 1000));
+        continue;                                                  // retry after Slack's backoff
+      }
+      console.log('[react fail]', name, err);
+      return false;
+    }
+  }
+  return false;
 }
 async function unreact(client, channel, ts, name) {
-  try { await client.reactions.remove({ channel, timestamp: ts, name }); } catch (e) { /* ignore */ }
+  try { await client.reactions.remove({ channel, timestamp: ts, name }); }
+  catch (e) { const err = (e && e.data && e.data.error); if (err && err !== 'no_reaction' && err !== 'message_not_found') console.log('[unreact]', name, err); }
 }
 
 // The session a fresh run created = the id present now but not before.
