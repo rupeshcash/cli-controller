@@ -102,6 +102,7 @@ const svg=(p,c='')=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const srcB=s=>s==='slack'?'<span class="badge b-slack">slack</span>':'<span class="badge b-term">terminal</span>';
 const meter=p=>{if(p==null)return'<span class="meter">—</span>';const c=p>80?'hi':p>50?'mid':'lo';return`<span class="meter ${c}"><span class="meter-bar"><span class="meter-fill" style="width:${p}%"></span></span>${p}%</span>`};
 const copyBtn=t=>`<button class="copy-btn" onclick="event.stopPropagation();navigator.clipboard.writeText(\`${t.replace(/`/g,'\\`')}\`);const o=this.innerHTML;this.innerHTML='✓';setTimeout(()=>this.innerHTML=o,1000)">${svg(ic.copy)}copy</button>`;
+const rcmd=(cwd,agent,id)=>`cd ${cwd||'~'} && kiro-cli chat${agent?' --agent '+agent:''} --resume-id ${id}`;
 
 let curView='dash';
 const NAV=[['dash','Dashboard',ic.dash],['sessions','Sessions',ic.list],['bridge','Bridge',ic.bridge]];
@@ -148,7 +149,7 @@ function paintSessions(){
   $('sess-body').innerHTML=data.map(s=>`<tr onclick="showDetail('${s.id}')">
     <td>${esc(s.title.slice(0,48))}</td><td>${srcB(s.source)}</td><td><code>${s.agent||'—'}</code></td>
     <td title="${esc(s.cwd)}"><code>${s.cwdShort||'—'}</code></td><td>${meter(s.contextPct)}</td>
-    <td>${s.messages||'—'}</td><td style="color:var(--text-dim)">${ago(s.updatedAt)}</td><td>${copyBtn('cd '+(s.cwd||'~')+' && kiro-cli chat --resume-id '+s.id)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">No sessions match.</td></tr>';
+    <td>${s.messages||'—'}</td><td style="color:var(--text-dim)">${ago(s.updatedAt)}</td><td>${copyBtn(rcmd(s.cwd, s.agent, s.id))}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">No sessions match.</td></tr>';
 }
 async function renderSessions(){
   if(!SESS.length)await loadSessions();
@@ -208,7 +209,7 @@ function paintThreads(){
   $('th-body').innerHTML=data.length?data.map(t=>`<tr>
     <td><div class="thread-title">${esc(t.title)||'<span style="opacity:.3">Untitled</span>'}</div><div class="thread-meta">${t.agent||'main'} · ${t.cwdShort||'—'}</div></td>
     <td>${t.messages||'—'}</td><td style="color:var(--text-dim)">${ago(t.lastActive)}</td>
-    <td>${t.sessionId?copyBtn('cd '+(t.cwd||'~')+' && kiro-cli chat --resume-id '+t.sessionId):''}</td></tr>`).join(''):'<tr><td colspan="4" class="empty">No active threads</td></tr>';
+    <td>${t.sessionId?copyBtn(rcmd(t.cwd, t.agent, t.sessionId)):''}</td></tr>`).join(''):'<tr><td colspan="4" class="empty">No active threads</td></tr>';
 }
 function onSortTh(key,type){if(tSort.key===key)tSort.dir=tSort.dir==='asc'?'desc':'asc';else tSort={key,dir:type==='num'?'desc':'asc'};paintThreads()}
 async function renderBridge(){

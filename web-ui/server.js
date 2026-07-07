@@ -157,7 +157,7 @@ app.get('/api/sessions/:id', (req, res) => {
   } catch { preview = { first: [], last: [], total: 0 }; }
 
   meta.source = getSlackSessionIds().has(meta.id) ? 'slack' : 'terminal';
-  meta.resumeCmd = `cd ${meta.cwd || '~'} && kiro-cli chat --resume-id ${meta.id}`;
+  meta.resumeCmd = `cd ${meta.cwd || '~'} && kiro-cli chat${meta.agent ? ` --agent ${meta.agent}` : ''} --resume-id ${meta.id}`;
   meta.preview = preview;
   res.json(meta);
 });
