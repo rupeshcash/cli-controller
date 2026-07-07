@@ -25,7 +25,7 @@ case "${1:-status}" in
     echo "🛑 Panel stopped."
     ;;
   restart)
-    "$0" stop; sleep 1; "$0" start
+    "$DIR/panel" stop; sleep 1; "$DIR/panel" start
     ;;
   status)
     if is_running; then echo "⚡ Running (pid $(cat "$PIDFILE")) at http://localhost:$PORT"; else echo "Not running."; fi

@@ -8,11 +8,14 @@
 //
 require('dotenv').config();
 const os = require('os');
+const path = require('path');
 const { App } = require('@slack/bolt');
-const { runKiro, listSessions, listAgents } = require('./kiro');
+const { runKiro, listSessions, listAgents, recentSessions, getSessionInfo, listModels } = require('./kiro');
 const store = require('./sessions');
 const { chunk } = require('./chunk');
 const { stripToolTrace, toSlack } = require('./format');
+
+function rel(d) { if (!d) return '—'; const s = Math.floor((Date.now() - new Date(d)) / 1000); if (s < 60) return s + 's ago'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago'; }
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const RAW_ALLOWED = (process.env.SLACK_ALLOWED_USER_IDS || '').trim();
@@ -60,6 +63,8 @@ const app = new App({
 
 // threadKey ("channel:rootTs") -> running child process (abort + single-flight per thread)
 const running = new Map();
+// threadKeys whose current run was aborted — suppresses output from the dying process.
+const aborted = new Set();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function helpText() {
@@ -91,7 +96,7 @@ function helpText() {
     '*In a thread*   `!status` · `!abort` · `!model <name>` · `!agent <name>` · `!verbose` · `!clear` · `!end`',
     '',
     '_Replies are *verbose* by default (full tool trace). Add `-q` to `!new`, or `!verbose` in a thread, to toggle quiet mode (answer only)._',
-    '*Anywhere*   `!help` · `!agents`',
+    '*Anywhere*   `!help` · `!agents` · `!models` · `!recent [n]` · `!teleport <sessionId>`',
     '',
     '*Status*   :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
   ].join('\n');
@@ -193,6 +198,14 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   });
   running.delete(threadKey);
 
+  // If this run was aborted, suppress all output — user already got the abort ack.
+  if (aborted.has(threadKey)) {
+    aborted.delete(threadKey);
+    if (reactedOk) await unreact(client, channel, reactTs, 'hourglass_flowing_sand');
+    console.log(`[turn aborted] ${threadKey} — suppressing output`);
+    return;
+  }
+
   // Resume-failure fallback: stale session id → start fresh once.
   if (!res.ok && !isFresh && /session|not found|no conversation|resume/i.test(res.error || '')) {
     await say({ thread_ts, text: '↻ Couldn’t resume the previous session — starting a fresh one for this thread.' });
@@ -258,6 +271,34 @@ async function handleMessage({ message, say, client }) {
     const list = await listAgents(cwd);
     return say({ thread_ts: rootTs, text: list ? `*Agents* (in \`${cwd}\`):\n\`\`\`\n${list.slice(0, 3000)}\n\`\`\`` : 'Could not list agents.' });
   }
+  if (lower === '!models') {
+    const models = await listModels();
+    return say({ thread_ts: rootTs, text: models.length ? `*Models:*\n${models.map((m) => `• \`${m}\``).join('\n')}\n\n_Set with_ \`!model <name>\`` : 'Could not list models.' });
+  }
+  if (lower.startsWith('!recent')) {
+    const n = Math.min(parseInt(text.split(/\s+/)[1], 10) || 8, 20);
+    const items = recentSessions(n);
+    if (!items.length) return say({ thread_ts: rootTs, text: 'No sessions found.' });
+    const body = items.map((s, i) => `*${i + 1}.* ${s.title}\n   \`${s.id}\`\n   ${s.agent || 'main'} · \`${s.cwd ? path.basename(s.cwd) : '~'}\` · ${rel(s.updatedAt)}`).join('\n\n');
+    return say({ thread_ts: rootTs, text: `*Recent Kiro sessions* (${items.length}):\n\n${body}\n\n_Continue any of them here with_ \`!teleport <sessionId>\`` });
+  }
+  if (lower.startsWith('!teleport')) {
+    const id = (text.split(/\s+/)[1] || '').trim();
+    if (!id) return say({ thread_ts: rootTs, text: 'Usage: `!teleport <sessionId>` — pull any Kiro session into a Slack thread. See `!recent`.' });
+    const info = getSessionInfo(id);
+    store.set(threadKey, {
+      cwd: (info && info.cwd) || DEFAULT_CWD,
+      agent: (info && info.agent) || DEFAULT_AGENT,
+      model: DEFAULT_MODEL,
+      verbose: true,
+      sessionId: id,
+      announced: true,
+    });
+    const meta = info
+      ? `${info.title ? `*${info.title.slice(0, 70)}*\n` : ''}dir \`${path.basename(info.cwd || '~')}\` · agent \`${info.agent || 'main'}\``
+      : '_(session file not found — using default dir; resume may start fresh)_';
+    return say({ thread_ts: rootTs, text: `🛸 *Teleported* \`${id.slice(0, 12)}…\` into this thread.\n${meta}\nReply here to continue this session.` });
+  }
 
   // ── Inside a thread → continue / control that session ──
   if (isThreadReply) {
@@ -270,8 +311,16 @@ async function handleMessage({ message, say, client }) {
       switch (cmd.toLowerCase()) {
         case 'abort': {
           const c = running.get(threadKey);
-          if (c) { c.kill('SIGTERM'); return say({ thread_ts: rootTs, text: '🛑 Aborting…' }); }
-          return say({ thread_ts: rootTs, text: 'Nothing is running in this thread.' });
+          if (!c) return say({ thread_ts: rootTs, text: 'Nothing is running in this thread.' });
+          // Immediately free the thread for new messages.
+          running.delete(threadKey);
+          aborted.add(threadKey);
+          // Kill process group (SIGTERM), escalate to SIGKILL after 3s.
+          try { process.kill(-c.pid, 'SIGTERM'); } catch (_) { try { c.kill('SIGTERM'); } catch (_) {} }
+          setTimeout(() => {
+            try { process.kill(-c.pid, 'SIGKILL'); } catch (_) { try { c.kill('SIGKILL'); } catch (_) {} }
+          }, 3000);
+          return say({ thread_ts: rootTs, text: '🛑 Aborted. You can send a new message now.' });
         }
         case 'status': {
           const st = store.get(threadKey);

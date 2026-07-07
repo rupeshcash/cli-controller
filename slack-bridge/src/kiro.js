@@ -1,6 +1,11 @@
 // src/kiro.js — thin wrapper around `kiro-cli chat` in headless mode.
 // Uses spawn with an args array (never a shell string) to avoid command injection.
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const SESSIONS_DIR = path.join(os.homedir(), '.kiro', 'sessions', 'cli');
 
 const BIN = () => process.env.KIRO_BIN || 'kiro-cli';
 
@@ -41,6 +46,7 @@ function runKiro({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs =
       child = spawn(BIN(), buildArgs({ sessionId, agent, model, trustTools }), {
         cwd: cwd || process.cwd(),
         env: process.env,
+        detached: true, // allows killing the entire process group via process.kill(-pid)
       });
     } catch (e) {
       return resolve({ ok: false, output: '', error: `Failed to start ${BIN()}: ${e.message}`, code: -1 });
@@ -117,4 +123,47 @@ function listAgents(cwd) {
   });
 }
 
-module.exports = { runKiro, listSessions, getLatestSessionId, listAgents };
+// Read all Kiro session files → most-recent-first list (global, cross-directory).
+function recentSessions(limit = 8) {
+  let files;
+  try { files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json')); } catch { return []; }
+  const items = [];
+  for (const f of files) {
+    try {
+      const d = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf8'));
+      if (!d.session_id) continue;
+      items.push({
+        id: d.session_id,
+        title: (d.title || '').slice(0, 70) || '(untitled)',
+        cwd: d.cwd || null,
+        agent: (d.session_state || {}).agent_name || null,
+        updatedAt: d.updated_at || null,
+      });
+    } catch { /* skip bad file */ }
+  }
+  items.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  return items.slice(0, limit);
+}
+
+// Look up a single session by id → { id, title, cwd, agent } or null.
+function getSessionInfo(id) {
+  try {
+    const d = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, `${id}.json`), 'utf8'));
+    return { id: d.session_id, title: d.title || '', cwd: d.cwd || null, agent: (d.session_state || {}).agent_name || null };
+  } catch { return null; }
+}
+
+// List available models (names) via kiro-cli.
+function listModels() {
+  return new Promise((resolve) => {
+    let child;
+    try { child = spawn(BIN(), ['chat', '--list-models', '-f', 'json'], { env: process.env }); }
+    catch { return resolve([]); }
+    let out = '';
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.on('error', () => resolve([]));
+    child.on('close', () => { try { resolve((JSON.parse(out).models || []).map((m) => m.model_name)); } catch { resolve([]); } });
+  });
+}
+
+module.exports = { runKiro, listSessions, getLatestSessionId, listAgents, recentSessions, getSessionInfo, listModels };

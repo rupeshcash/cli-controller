@@ -24,9 +24,9 @@ case "${1:-status}" in
     echo "🛑 Stopped."
     ;;
   restart)
-    "$0" stop
+    "$DIR/bridge" stop
     sleep 1
-    "$0" start
+    "$DIR/bridge" start
     ;;
   status)
     if is_running; then
