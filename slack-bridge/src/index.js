@@ -11,6 +11,7 @@ const os = require('os');
 const path = require('path');
 const { App } = require('@slack/bolt');
 const { runKiro, listSessions, listAgents, recentSessions, getSessionInfo, sessionLock, listModels } = require('./kiro');
+const { route } = require('./broker');
 const store = require('./sessions');
 const { chunk } = require('./chunk');
 const { stripToolTrace, toSlack } = require('./format');
@@ -43,6 +44,15 @@ const DIR_ALIASES = (process.env.KIRO_DIR_ALIASES || '')
 
 function expandHome(p) { return p && p.startsWith('~') ? p.replace(/^~/, os.homedir()) : p; }
 function resolveDir(v) { return expandHome(DIR_ALIASES[v] || v); }
+
+// Natural-language routing broker (plain messages → decide dir/agent/model).
+const BROKER_ON = process.env.KIRO_BROKER !== '0';
+const BROKER_MODEL = process.env.KIRO_BROKER_MODEL || 'claude-haiku-4.5';
+let AGENTS_RAW = '';
+let MODELS_CACHE = [];
+function brokerCtx() {
+  return { aliases: DIR_ALIASES, quick: QUICK_ALIASES, agentsRaw: AGENTS_RAW, models: MODELS_CACHE, defaultAgent: DEFAULT_AGENT, defaultCwd: DEFAULT_CWD };
+}
 
 // Quick aliases: KIRO_QUICK_ALIASES="name:dir|model|agent, name2:dir|model"
 // e.g. 25-opus:~/Documents/armorcode-2025|claude-opus-4.8|main
@@ -109,8 +119,9 @@ function helpText() {
     `• Defaults: agent \`${DEFAULT_AGENT}\` · dir \`${DEFAULT_CWD}\` · verbose on.`,
     '',
     '━━ *Start a session* ━━',
-    '• `summarize the README here` — just type a task',
-    `• \`!new ${ws} run the unit tests\` — start in a saved workspace`,
+    '• Just describe what you want, naturally — a router picks the repo/agent/model for you.',
+    '   e.g. `in the 2025 java-utils repo, use opus to fix the failing SLA test`',
+    `• \`!new ${ws} run the unit tests\` — explicit workspace`,
     '• `!new dir=~/path model=claude-opus-4.8 agent=main <task>` — full control',
     '• `!new -q <task>` — quiet (answer only, no tool trace)',
   ];
@@ -446,7 +457,23 @@ async function handleMessage({ message, say, client }) {
     }
     return say({ thread_ts: message.ts, text: 'Unknown command. Just type a task to start a session, or `!help`.' });
   }
-  // Plain message → auto-start a new session (agent: main by default).
+  // Plain natural-language message → route via broker (if on), else default session.
+  if (BROKER_ON) {
+    const rt = message.ts;
+    const tkey = `${channel}:${rt}`;
+    await say({ thread_ts: rt, text: ':compass: _routing your request…_' });
+    let decision = null;
+    try { decision = await route(text, brokerCtx(), BROKER_MODEL); }
+    catch (e) { console.log('[broker error]', e.message); }
+    if (decision && decision.cwd) {
+      store.set(tkey, { cwd: decision.cwd, agent: decision.agent || DEFAULT_AGENT, model: decision.model || DEFAULT_MODEL, verbose: true, sessionId: null, announced: true });
+      await say({ thread_ts: rt, text: `:compass: *${decision.note || 'Routed'}*\ndir \`${path.basename(decision.cwd)}\` · agent \`${decision.agent || DEFAULT_AGENT}\`${decision.model ? ` · model \`${decision.model}\`` : ''}` });
+      if (decision.prompt) return runTurn({ threadKey: tkey, thread_ts: rt, reactTs: rt, channel, prompt: decision.prompt, say, client });
+      return say({ thread_ts: rt, text: 'Reply in this thread to continue.' });
+    }
+    // broker failed → fall through to default
+  }
+  // Default: auto-start a new session (agent: main by default).
   return startSession({ threadKey, rootTs: message.ts, reactTs: message.ts, channel, patch: {}, prompt: text, say, client });
 }
 
@@ -469,4 +496,10 @@ app.message(async (args) => {
   console.log('   Default agent:', DEFAULT_AGENT, '| dir:', DEFAULT_CWD, '| timeout(ms):', TIMEOUT_MS || 'none');
   const aliases = Object.keys(DIR_ALIASES);
   if (aliases.length) console.log('   Dir aliases:', aliases.join(', '));
+  console.log('   Broker:', BROKER_ON ? `on (${BROKER_MODEL})` : 'off');
+  // Warm caches for the NL broker (best-effort, non-blocking).
+  if (BROKER_ON) {
+    try { AGENTS_RAW = await listAgents(DEFAULT_CWD); } catch {}
+    try { MODELS_CACHE = await listModels(); } catch {}
+  }
 })();
