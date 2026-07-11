@@ -228,7 +228,9 @@ async function unreact(client, channel, ts, name) {
 async function captureNewSession(cwd, beforeIds) {
   const now = await listSessions(cwd);
   const fresh = now.find((s) => !beforeIds.has(s.sessionId));
-  return (fresh && fresh.sessionId) || (now[0] && now[0].sessionId) || null;
+  // Only return a genuinely-new session. NEVER fall back to an existing one —
+  // that would silently latch the thread onto an unrelated conversation.
+  return (fresh && fresh.sessionId) || null;
 }
 
 async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, client }) {
@@ -279,8 +281,11 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
       trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
     });
     running.delete(threadKey);
-    if (res.ok) { const sid = await captureNewSession(st.cwd, before2); if (sid) store.set(threadKey, { sessionId: sid }); }
-  } else if (isFresh && res.ok) {
+    const sid2 = await captureNewSession(st.cwd, before2); if (sid2) store.set(threadKey, { sessionId: sid2 });
+  } else if (isFresh) {
+    // Capture even on failure: a transient Kiro backend error still creates the
+    // session (with the user's message), so a retry can resume WITH context
+    // instead of zoning out into a brand-new session.
     const sid = await captureNewSession(st.cwd, beforeIds);
     if (sid) store.set(threadKey, { sessionId: sid });
   }
@@ -294,7 +299,11 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   console.log(`[turn done] ${threadKey} ok=${res.ok} code=${res.code} outLen=${(res.output || '').length} err=${(res.error || '').slice(0, 120)}`);
 
   if (!res.ok && !res.output) {
-    return sayThread(say, thread_ts, `⚠️ ${res.error || `Kiro exited with code ${res.code}.`}`);
+    const st2 = store.get(threadKey);
+    const hint = st2.sessionId
+      ? '\n\n_This turn failed (often a transient Kiro backend error). Just send your message again — the session is kept, so I retry with full context._'
+      : '\n\n_This turn failed before a session was established. Send your message again to retry._';
+    return sayThread(say, thread_ts, `⚠️ ${res.error || `Kiro exited with code ${res.code}.`}${hint}`);
   }
   await sendOutput({ client, say, channel, thread_ts, text: res.output, verbose: st.verbose });
   if (!res.ok && res.error) await sayThread(say, thread_ts, `_error:_\n${res.error}`);
