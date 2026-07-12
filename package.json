@@ -9,7 +9,8 @@
     "start": "node bin/cli-controller.js",
     "setup": "node bin/cli-controller.js setup",
     "doctor": "node bin/cli-controller.js doctor",
-    "test": "node --test"
+    "test": "node --test",
+    "prepublishOnly": "node --test"
   },
   "files": [
     "bin/", "lib/", "core/",
@@ -26,5 +27,7 @@
   "keywords": ["slack", "kiro", "cline", "ai", "coding-agent", "cli", "local-first", "automation"],
   "license": "MIT",
   "author": "rupeshcash",
-  "repository": { "type": "git", "url": "git+https://github.com/rupeshcash/cli-controller.git" }
+  "repository": { "type": "git", "url": "git+https://github.com/rupeshcash/cli-controller.git" },
+  "bugs": { "url": "https://github.com/rupeshcash/cli-controller/issues" },
+  "homepage": "https://github.com/rupeshcash/cli-controller#readme"
 }
