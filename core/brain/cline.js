@@ -3,7 +3,7 @@
 // line-delimited JSON events, resume via --id, sessions via `cline history --json`,
 // model via -m / provider via -P / key via -k, trust via --auto-approve.
 // No single-writer lock. --json => incremental output (streaming brain).
-const { spawn, spawnSync } = require('child_process');
+const { spawnCli, spawnCliSync, resolveCommand } = require('../spawn');
 
 const BIN = () => process.env.CLINE_BIN || 'cline';
 
@@ -15,6 +15,18 @@ function buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs }) {
   if (provider) args.push('-P', provider);
   if (timeoutMs && timeoutMs > 0) args.push('-t', String(Math.round(timeoutMs / 1000)));
   return args;
+}
+
+function normalizeHistory(raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw || '[]'); } catch { return []; }
+  const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.sessions) ? parsed.sessions : []);
+  return arr.map((e) => ({
+    sessionId: e.id || e.sessionId || e.taskId || e.conversationId || null,
+    title: ((e.metadata && e.metadata.title) || e.title || e.prompt || e.task || e.name || e.summary || '').slice(0, 70) || '(untitled)',
+    cwd: e.cwd || e.workspace || null,
+    updatedAt: e.updatedAt || e.updated_at || e.ts || null,
+  })).filter((s) => s.sessionId);
 }
 
 // Parse Cline's line-delimited JSON. Returns { ok, text, sessionId, error, events }.
@@ -48,7 +60,7 @@ function runCline({ cwd, sessionId, model, provider, trustTools, prompt, timeout
     const args = buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs });
     args.push(prompt || '');
     let child;
-    try { child = spawn(BIN(), args, { cwd: cwd || process.cwd(), env: process.env }); }
+    try { child = spawnCli(BIN(), args, { cwd: cwd || process.cwd(), env: process.env }); }
     catch (e) { return resolve({ ok: false, output: '', error: `Failed to start ${BIN()}: ${e.message}`, code: -1 }); }
     if (typeof onSpawn === 'function') onSpawn(child);
     let out = '', err = '';
@@ -72,27 +84,21 @@ function runCline({ cwd, sessionId, model, provider, trustTools, prompt, timeout
 function listSessions(cwd) {
   return new Promise((resolve) => {
     let child;
-    try { child = spawn(BIN(), ['history', '--json', '--limit', '100'], { cwd: cwd || process.cwd(), env: process.env }); }
+    try { child = spawnCli(BIN(), ['history', '--json', '--limit', '100'], { cwd: cwd || process.cwd(), env: process.env }); }
     catch { return resolve([]); }
     let out = '';
     child.stdout.on('data', (d) => { out += d.toString(); });
     child.on('error', () => resolve([]));
     child.on('close', () => {
       try {
-        const arr = JSON.parse(out);
-        resolve((Array.isArray(arr) ? arr : []).map((e) => ({
-          sessionId: e.id || e.sessionId || e.taskId || e.conversationId || null,
-          title: (e.title || e.task || e.name || e.summary || '').slice(0, 70) || '(untitled)',
-          cwd: e.cwd || e.workspace || null,
-          updatedAt: e.updatedAt || e.updated_at || e.ts || null,
-        })).filter((s) => s.sessionId));
+        resolve(normalizeHistory(out));
       } catch { resolve([]); }
     });
   });
 }
 
 function isInstalled() {
-  const r = spawnSync(BIN(), ['--version'], { encoding: 'utf8', timeout: 6000, shell: process.platform === 'win32' });
+  const r = spawnCliSync(BIN(), ['--version'], { encoding: 'utf8', timeout: 6000 });
   return !(r.error || r.status !== 0);
 }
 
@@ -109,8 +115,8 @@ const adapter = {
   recentSessions: async (limit) => (await listSessions()).slice(0, limit).map((s) => ({ ...s, id: s.sessionId, agent: null, locked: false })),
   getSessionInfo: async (id) => (await listSessions()).find((s) => s.sessionId === id) || null,
   prepareResume: async () => ({ action: 'ok' }),   // no single-writer lock
-  buildResumeCommand: (s) => `cd ${s.cwd || '~'} && cline -c ${s.cwd || '.'} --id ${s.id || s.sessionId}`,
+  buildResumeCommand: (s) => `cd ${s.cwd || '~'} && ${resolveCommand(BIN())} -c ${s.cwd || '.'} --id ${s.id || s.sessionId}`,
   doctor: async () => ({ ok: isInstalled(), msg: isInstalled() ? 'cline found' : 'cline not found on PATH (npm i -g cline)' }),
 };
 
-module.exports = { runCline, listSessions, parseJsonl, adapter, capabilities };
+module.exports = { runCline, listSessions, parseJsonl, normalizeHistory, buildArgs, adapter, capabilities };
