@@ -1,6 +1,6 @@
 # cli-controller
 
-Drive [Kiro CLI](https://kiro.dev) coding agents from **Slack** — from your phone, without SSH — plus a local **web dashboard** to see and resume every session (terminal *or* Slack) in one place.
+Drive AI coding CLIs such as [Kiro CLI](https://kiro.dev) and Cline from **Slack** — from your phone, without SSH — plus a local **web dashboard** to see and resume sessions in one place.
 
 Built for a real need: control AI coding sessions on your dev machine while away from it, safely, with sessions you can hand off between terminal and chat.
 
@@ -8,7 +8,7 @@ Built for a real need: control AI coding sessions on your dev machine while away
 
 | Component | What it does |
 |---|---|
-| **`slack-bridge/`** | Slack ⇄ Kiro CLI bridge (Socket Mode). Each Slack thread = one Kiro session. |
+| **`slack-bridge/`** | Slack ⇄ AI CLI bridge (Socket Mode). Each Slack thread = one Kiro/Cline session. |
 | **`web-ui/`** | Local dashboard (`localhost:1234`) — unified session history, bridge control, live logs. |
 | Decision docs | `evaluation.md`, `approaches.md`, `free-safe-recommendation.md`, `work-laptop-options.md` — why Slack + Socket Mode over WhatsApp/Telegram/Signal. |
 
@@ -18,7 +18,8 @@ Slack's official **Socket Mode** (outbound WebSocket) needs no public URL, no po
 
 ## Highlights
 
-- **Thread = session.** Send a message → a Kiro session opens in a thread; reply in the thread to continue; each new message is an independent, parallel session.
+- **Thread = session.** Send a message → an AI CLI session opens in a thread; reply in the thread to continue; each new message is an independent, parallel session.
+- **Kiro + Cline brains.** Set `CLI_CONTROLLER_DEFAULT_BRAIN=kiro` or `cline`, or start explicitly with `!new brain=cline dir=~/repo <task>`.
 - **Natural-language routing.** Just type *"in the 2025 java-utils repo, use opus to fix the failing SLA test"* — a fast router picks the directory, agent, and model for you (great on a phone). Explicit `!new`/quick-aliases bypass it.
 - **Quick starts.** `!25-opus`, `!26-sonnet`, … — one-shot presets (dir + model + agent) from config.
 - **Find & resume anything.** `!recent` lists all sessions (terminal + Slack, 🔒 = open elsewhere); `!teleport <id>` pulls any session into a thread and continues it with the right dir/agent.
@@ -29,17 +30,20 @@ Slack's official **Socket Mode** (outbound WebSocket) needs no public URL, no po
 ## Quickstart
 
 ```bash
-# 1. Slack bridge
+# 1. Install dependencies from the repo root
+npm install
+
+# 2. Slack bridge
 cd slack-bridge
 cp .env.example .env      # fill SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_ALLOWED_USER_IDS, etc.
-npm install
 ./bridge start            # or: npm start
 
-# 2. Web dashboard (optional)
+# 3. Web dashboard (optional)
 cd ../web-ui
-npm install
 ./panel open              # starts on :1234 and opens the browser
 ```
+
+For Cline support, install/configure the Cline CLI separately (`npm i -g cline`) and set `CLI_CONTROLLER_DEFAULT_BRAIN=cline` in `slack-bridge/.env` or use `!new brain=cline provider=anthropic model=<model> ...` per session.
 
 Full Slack-app setup (scopes, Socket Mode, Messages tab) → [`slack-bridge/SETUP.md`](slack-bridge/SETUP.md).
 Usage guide → [`slack-bridge/TUTORIAL.md`](slack-bridge/TUTORIAL.md) · Session model & internals → [`slack-bridge/LIFECYCLE.md`](slack-bridge/LIFECYCLE.md).
@@ -50,7 +54,9 @@ Usage guide → [`slack-bridge/TUTORIAL.md`](slack-bridge/TUTORIAL.md) · Sessio
 |---|---|
 | `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` | Bot (`xoxb-`) + Socket Mode (`xapp-`) tokens |
 | `SLACK_ALLOWED_USER_IDS` | `*` for all, or comma-separated Slack user IDs |
-| `KIRO_AGENT` / `KIRO_DEFAULT_CWD` / `KIRO_MODEL` | Defaults |
+| `CLI_CONTROLLER_DEFAULT_BRAIN` | Default AI CLI adapter: `kiro` or `cline` |
+| `KIRO_AGENT` / `KIRO_DEFAULT_CWD` / `KIRO_MODEL` | Defaults used by Kiro and compatible per-session routing fields |
+| `CLINE_BIN` | Cline executable name/path (default `cline`) |
 | `KIRO_TRUST_TOOLS` | `ALL` (full autonomy) / `fs_read` / empty |
 | `KIRO_DIR_ALIASES` | `name:path,…` workspace shortcuts |
 | `KIRO_QUICK_ALIASES` | `name:dir\|model\|agent,…` one-shot presets (`!<name>`) |

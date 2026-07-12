@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// src/index.js — Kiro Slack bridge (Socket Mode). Model: THREAD = SESSION.
+// src/index.js — Slack bridge (Socket Mode). Model: THREAD = SESSION.
 //
-//   • Send ANY message            → starts a new Kiro session; the bot replies in a thread.
+//   • Send ANY message            → starts a new AI CLI session; the bot replies in a thread.
 //   • Reply inside that thread     → continues the same session (no command).
 //   • Each top-level message       → an independent, parallel session (its own thread).
 //   • Default agent: `main` (configurable). Reactions show status: ⏳ → ✅ / ❌.
@@ -10,7 +10,7 @@ require('dotenv').config();
 const os = require('os');
 const path = require('path');
 const { App } = require('@slack/bolt');
-const { runKiro, listSessions, listAgents, recentSessions, getSessionInfo, sessionLock, listModels } = require('./kiro');
+const brains = require('../../core/brain');
 const { route } = require('./broker');
 const store = require('./sessions');
 const { chunk } = require('./chunk');
@@ -23,6 +23,7 @@ const RAW_ALLOWED = (process.env.SLACK_ALLOWED_USER_IDS || '').trim();
 const ALLOW_ALL = RAW_ALLOWED === '*' || RAW_ALLOWED.toUpperCase() === 'ALL';
 const ALLOWED = ALLOW_ALL ? [] : RAW_ALLOWED.split(',').map((s) => s.trim()).filter(Boolean);
 const TRUST_TOOLS = process.env.KIRO_TRUST_TOOLS ?? 'fs_read';
+const DEFAULT_BRAIN = (process.env.CLI_CONTROLLER_DEFAULT_BRAIN || process.env.KIRO_DEFAULT_BRAIN || brains.DEFAULT_BRAIN || 'kiro').toLowerCase();
 const DEFAULT_CWD = process.env.KIRO_DEFAULT_CWD || process.cwd();
 const DEFAULT_AGENT = process.env.KIRO_AGENT || 'main';
 const DEFAULT_MODEL = process.env.KIRO_MODEL || null;
@@ -46,12 +47,36 @@ function expandHome(p) { return p && p.startsWith('~') ? p.replace(/^~/, os.home
 function resolveDir(v) { return expandHome(DIR_ALIASES[v] || v); }
 
 // Natural-language routing broker (plain messages → decide dir/agent/model).
-const BROKER_ON = process.env.KIRO_BROKER !== '0';
+const BROKER_ON = process.env.KIRO_BROKER !== '0' && DEFAULT_BRAIN === 'kiro';
 const BROKER_MODEL = process.env.KIRO_BROKER_MODEL || 'claude-haiku-4.5';
 let AGENTS_RAW = '';
 let MODELS_CACHE = [];
 function brokerCtx() {
   return { aliases: DIR_ALIASES, quick: QUICK_ALIASES, agentsRaw: AGENTS_RAW, models: MODELS_CACHE, defaultAgent: DEFAULT_AGENT, defaultCwd: DEFAULT_CWD };
+}
+
+function brainFor(id) { return brains.getBrain((id || DEFAULT_BRAIN || 'kiro').toLowerCase()); }
+function brainIdForState(st) { return (st && st.brain) || DEFAULT_BRAIN || 'kiro'; }
+function brainLabel(id) { const b = brainFor(id); return b.displayName || b.id || id || 'AI'; }
+async function listSessionsFor(stOrCwd) {
+  const st = typeof stOrCwd === 'object' ? stOrCwd : { cwd: stOrCwd, brain: DEFAULT_BRAIN };
+  return brainFor(brainIdForState(st)).listSessions(st.cwd);
+}
+async function captureNewSession(st, beforeIds) {
+  const now = await listSessionsFor(st);
+  const fresh = now.find((s) => !beforeIds.has(s.sessionId));
+  return (fresh && fresh.sessionId) || null;
+}
+
+function rememberThreadSession(threadKey, st, prompt, res) {
+  const sid = res && res.sessionId;
+  if (!sid) return;
+  try {
+    const mem = require('../../core/memory').memory();
+    mem.recordSession({ sessionId: sid, brain: brainIdForState(st), cwd: st.cwd, title: (prompt || '').slice(0, 70) });
+    mem.recordTurn({ sessionId: sid, prompt, summary: ((res.output || res.error || '')).slice(0, 240), tags: [brainIdForState(st), path.basename(st.cwd || '')].filter(Boolean) });
+    mem.linkThread(threadKey, sid);
+  } catch { /* memory is best-effort */ }
 }
 
 // Quick aliases: KIRO_QUICK_ALIASES="name:dir|model|agent, name2:dir|model"
@@ -97,9 +122,7 @@ function livePeek(threadKey) {
   const mins = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
   const tail = ansiStrip(p.buf).replace(/\n{3,}/g, '\n\n').trim().slice(-1600);
   if (tail) return `⏳ *Running ${mins}* — latest activity:\n\`\`\`\n${tail}\n\`\`\``;
-  // Kiro buffers output until the turn completes (not a TTY), so mid-run content
-  // usually isn't available yet — report liveness instead.
-  return `⏳ *Kiro is still working — ${mins} elapsed.*\nOutput arrives when the turn completes. Send \`!abort\` to cancel.`;
+  return `⏳ *AI CLI is still working — ${mins} elapsed.*\nOutput arrives when the turn completes. Send \`!abort\` to cancel.`;
 }
 // threadKeys whose current run was aborted — suppresses output from the dying process.
 const aborted = new Set();
@@ -110,19 +133,19 @@ function helpText() {
   const quickNames = Object.keys(QUICK_ALIASES);
   const ws = aliasNames.length ? aliasNames[0] : 'myrepo';
   const lines = [
-    ':zap: *Kiro Bridge* — run Kiro from Slack. Each thread = one Kiro session.',
+    `:zap: *CLI Controller* — run ${brainLabel(DEFAULT_BRAIN)} from Slack. Each thread = one session.`,
     '',
     '━━ *How it works* ━━',
     '• *Send any message* → starts a new session; I reply in a :thread: *thread*.',
     '• *Reply inside that thread* → continues the same session (full context).',
     '• Each new top-level message → a separate, *parallel* session.',
-    `• Defaults: agent \`${DEFAULT_AGENT}\` · dir \`${DEFAULT_CWD}\` · verbose on.`,
+    `• Defaults: brain \`${DEFAULT_BRAIN}\` · agent \`${DEFAULT_AGENT}\` · dir \`${DEFAULT_CWD}\` · verbose on.`,
     '',
     '━━ *Start a session* ━━',
     '• Just describe what you want, naturally — a router picks the repo/agent/model for you.',
     '   e.g. `in the 2025 java-utils repo, use opus to fix the failing SLA test`',
     `• \`!new ${ws} run the unit tests\` — explicit workspace`,
-    '• `!new dir=~/path model=claude-opus-4.8 agent=main <task>` — full control',
+    '• `!new brain=cline dir=~/path provider=anthropic model=claude-opus-4.8 <task>` — full control',
     '• `!new -q <task>` — quiet (answer only, no tool trace)',
   ];
   if (quickNames.length) lines.push(`• Quick starts: ${quickNames.map((a) => '`!' + a + '`').join(' · ')}`);
@@ -132,12 +155,12 @@ function helpText() {
     '━━ *Inside a thread* ━━',
     '• `!peek` / `!status` — is it still running? how long? / session info',
     '• `!abort` — stop the current task',
-    '• `!model <name>` — switch model  ·  `!agent <name>` — switch agent',
+    '• `!model <name>` / `!provider <name>` — switch model/provider  ·  `!agent <name>` — switch agent',
     '• `!verbose` — toggle full tool trace vs answer-only',
     '• `!clear` — fresh session (same thread)  ·  `!end` — close session',
     '',
     '━━ *Find & resume any session* ━━',
-    '• `!recent [n]` — list recent Kiro sessions (terminal *and* Slack)',
+    `• \`!recent [n]\` — list recent ${brainLabel(DEFAULT_BRAIN)} sessions (terminal *and* Slack where supported)`,
     '• `!teleport <sessionId>` — pull any session into a thread & continue it',
     '',
     '━━ *Info* ━━',
@@ -151,16 +174,18 @@ function helpText() {
 function parseNew(text) {
   let rest = text.slice(4).trim(); // after "!new"
   const patch = {};
-  const optRe = /^(agent|dir|cwd|model|verbose)\s*=\s*(\S+)\s*/i;
+  const optRe = /^(brain|tool|agent|dir|cwd|model|provider|verbose)\s*=\s*(\S+)\s*/i;
   const flagVRe = /^(?:-v|--verbose)(?:\s+|$)/i;
   const flagQRe = /^(?:-q|--quiet)(?:\s+|$)/i;
   for (;;) {
     let m;
     if ((m = rest.match(optRe))) {
       const k = m[1].toLowerCase(); const v = m[2];
-      if (k === 'agent') patch.agent = v;
+      if (k === 'brain' || k === 'tool') patch.brain = v.toLowerCase();
+      else if (k === 'agent') patch.agent = v;
       else if (k === 'dir' || k === 'cwd') patch.cwd = resolveDir(v);
       else if (k === 'model') patch.model = v;
+      else if (k === 'provider') patch.provider = v;
       else if (k === 'verbose') patch.verbose = /^(true|on|yes|1)$/i.test(v);
       rest = rest.slice(m[0].length);
       continue;
@@ -182,7 +207,7 @@ async function sayThread(say, thread_ts, text) {
   for (const part of chunk(text)) await say({ thread_ts, text: part });
 }
 
-// Send Kiro output to the thread: inline (chunked) if small, else as a file snippet.
+// Send AI CLI output to the thread: inline (chunked) if small, else as a file snippet.
 async function sendOutput({ client, say, channel, thread_ts, text, verbose }) {
   const raw = text && text.trim() ? text : '(no output)';
   const shown = verbose ? raw : stripToolTrace(raw);
@@ -192,8 +217,8 @@ async function sendOutput({ client, say, channel, thread_ts, text, verbose }) {
     await client.files.uploadV2({
       channel_id: channel,
       thread_ts,
-      filename: 'kiro-response.md',
-      title: 'Kiro output',
+      filename: 'ai-response.md',
+      title: 'AI output',
       initial_comment: `📄 Long output (${finalText.length.toLocaleString()} chars) — attached:`,
       content: finalText, // raw Markdown in the downloadable file
     });
@@ -224,42 +249,34 @@ async function unreact(client, channel, ts, name) {
   catch (e) { const err = (e && e.data && e.data.error); if (err && err !== 'no_reaction' && err !== 'message_not_found') console.log('[unreact]', name, err); }
 }
 
-// The session a fresh run created = the id present now but not before.
-async function captureNewSession(cwd, beforeIds) {
-  const now = await listSessions(cwd);
-  const fresh = now.find((s) => !beforeIds.has(s.sessionId));
-  // Only return a genuinely-new session. NEVER fall back to an existing one —
-  // that would silently latch the thread onto an unrelated conversation.
-  return (fresh && fresh.sessionId) || null;
-}
-
 async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, client }) {
   if (running.has(threadKey)) {
     return say({ thread_ts, text: '⏳ Still working in this thread. Send `!abort` to cancel it first.' });
   }
   const st = store.get(threadKey);
+  const brain = brainFor(brainIdForState(st));
   const isFresh = !st.sessionId;
-  console.log(`[turn] ${threadKey} fresh=${isFresh} dir=${st.cwd} agent=${st.agent || 'default'} promptLen=${prompt.length}`);
+  console.log(`[turn] ${threadKey} brain=${brain.id} fresh=${isFresh} dir=${st.cwd} agent=${st.agent || 'default'} promptLen=${prompt.length}`);
 
   // Session header card — shown once per session (not repeated on the first prompt).
   if (isFresh && !st.announced) {
-    await say({ thread_ts, text: `:thread: *New session* · dir \`${st.cwd}\` · agent \`${st.agent || 'default'}\`${st.model ? ` · model \`${st.model}\`` : ''}` });
+    await say({ thread_ts, text: `:thread: *New ${brainLabel(brain.id)} session* · dir \`${st.cwd}\` · agent \`${st.agent || 'default'}\`${st.model ? ` · model \`${st.model}\`` : ''}${st.provider ? ` · provider \`${st.provider}\`` : ''}` });
     store.set(threadKey, { announced: true });
   }
 
   // Status via reaction; fall back to a text note if reactions aren't permitted.
   const reactedOk = await react(client, channel, reactTs, 'hourglass_flowing_sand');
-  if (!reactedOk) await say({ thread_ts, text: '🤔 Kiro is working…' });
+  if (!reactedOk) await say({ thread_ts, text: `🤔 ${brainLabel(brain.id)} is working…` });
 
-  const beforeIds = isFresh ? new Set((await listSessions(st.cwd)).map((s) => s.sessionId)) : new Set();
+  const beforeIds = isFresh ? new Set((await listSessionsFor(st)).map((s) => s.sessionId)) : new Set();
 
   const prog = { startedAt: Date.now(), buf: '' };
   progress.set(threadKey, prog);
   const onData = (c) => { prog.buf += c; if (prog.buf.length > 24000) prog.buf = prog.buf.slice(-24000); };
 
-  let res = await runKiro({
+  let res = await brain.runTurn({
     cwd: st.cwd, sessionId: st.sessionId, agent: st.agent, model: st.model,
-    trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
+    provider: st.provider, trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
   });
   running.delete(threadKey);
 
@@ -275,20 +292,21 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   // Resume-failure fallback: stale session id → start fresh once.
   if (!res.ok && !isFresh && /session|not found|no conversation|resume/i.test(res.error || '')) {
     await say({ thread_ts, text: '↻ Couldn’t resume the previous session — starting a fresh one for this thread.' });
-    const before2 = new Set((await listSessions(st.cwd)).map((s) => s.sessionId));
-    res = await runKiro({
+    const before2 = new Set((await listSessionsFor(st)).map((s) => s.sessionId));
+    res = await brain.runTurn({
       cwd: st.cwd, sessionId: null, agent: st.agent, model: st.model,
-      trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
+      provider: st.provider, trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
     });
     running.delete(threadKey);
-    const sid2 = await captureNewSession(st.cwd, before2); if (sid2) store.set(threadKey, { sessionId: sid2 });
+    const sid2 = res.sessionId || await captureNewSession(st, before2); if (sid2) store.set(threadKey, { sessionId: sid2 });
   } else if (isFresh) {
-    // Capture even on failure: a transient Kiro backend error still creates the
+    // Capture even on failure: a transient backend error may still create the
     // session (with the user's message), so a retry can resume WITH context
     // instead of zoning out into a brand-new session.
-    const sid = await captureNewSession(st.cwd, beforeIds);
+    const sid = res.sessionId || await captureNewSession(st, beforeIds);
     if (sid) store.set(threadKey, { sessionId: sid });
   }
+  rememberThreadSession(threadKey, { ...st, sessionId: store.get(threadKey).sessionId }, prompt, { ...res, sessionId: store.get(threadKey).sessionId || res.sessionId });
   progress.delete(threadKey);
 
   // Finalize status reaction.
@@ -301,9 +319,9 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   if (!res.ok && !res.output) {
     const st2 = store.get(threadKey);
     const hint = st2.sessionId
-      ? '\n\n_This turn failed (often a transient Kiro backend error). Just send your message again — the session is kept, so I retry with full context._'
+      ? `\n\n_This turn failed (often a transient ${brainLabel(brain.id)} backend error). Just send your message again — the session is kept, so I retry with full context._`
       : '\n\n_This turn failed before a session was established. Send your message again to retry._';
-    return sayThread(say, thread_ts, `⚠️ ${res.error || `Kiro exited with code ${res.code}.`}${hint}`);
+    return sayThread(say, thread_ts, `⚠️ ${res.error || `${brainLabel(brain.id)} exited with code ${res.code}.`}${hint}`);
   }
   await sendOutput({ client, say, channel, thread_ts, text: res.output, verbose: st.verbose });
   if (!res.ok && res.error) await sayThread(say, thread_ts, `_error:_\n${res.error}`);
@@ -311,16 +329,18 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
 
 async function startSession({ threadKey, rootTs, reactTs, channel, patch, prompt, say, client }) {
   store.set(threadKey, {
+    brain: patch.brain || DEFAULT_BRAIN,
     cwd: patch.cwd || DEFAULT_CWD,
     agent: patch.agent !== undefined ? patch.agent : DEFAULT_AGENT,
     model: patch.model !== undefined ? patch.model : DEFAULT_MODEL,
+    provider: patch.provider || null,
     verbose: patch.verbose !== undefined ? patch.verbose : true,
     sessionId: null,
   });
   if (prompt) return runTurn({ threadKey, thread_ts: rootTs, reactTs, channel, prompt, say, client });
   const s = store.get(threadKey);
   store.set(threadKey, { announced: true });
-  return say({ thread_ts: rootTs, text: `:thread: *New session* · dir \`${s.cwd}\` · agent \`${s.agent || 'default'}\`\nReply in this thread to continue.` });
+  return say({ thread_ts: rootTs, text: `:thread: *New ${brainLabel(s.brain)} session* · dir \`${s.cwd}\` · agent \`${s.agent || 'default'}\`${s.provider ? ` · provider \`${s.provider}\`` : ''}\nReply in this thread to continue.` });
 }
 
 // ── Message handling ────────────────────────────────────────────────────────
@@ -342,26 +362,32 @@ async function handleMessage({ message, say, client }) {
   if (lower === '!help') return say({ thread_ts: rootTs, text: helpText() });
   if (lower === '!agents') {
     const cwd = store.has(threadKey) ? store.get(threadKey).cwd : DEFAULT_CWD;
-    const list = await listAgents(cwd);
+    const b = store.has(threadKey) ? brainFor(brainIdForState(store.get(threadKey))) : brainFor(DEFAULT_BRAIN);
+    const list = b.listAgents ? await b.listAgents(cwd) : '';
     return say({ thread_ts: rootTs, text: list ? `*Agents* (in \`${cwd}\`):\n\`\`\`\n${list.slice(0, 3000)}\n\`\`\`` : 'Could not list agents.' });
   }
   if (lower === '!models') {
-    const models = await listModels();
+    const b = store.has(threadKey) ? brainFor(brainIdForState(store.get(threadKey))) : brainFor(DEFAULT_BRAIN);
+    const models = b.listModels ? await b.listModels() : [];
     return say({ thread_ts: rootTs, text: models.length ? `*Models:*\n${models.map((m) => `• \`${m}\``).join('\n')}\n\n_Set with_ \`!model <name>\`` : 'Could not list models.' });
   }
   if (lower.startsWith('!recent')) {
     const n = Math.min(parseInt(text.split(/\s+/)[1], 10) || 8, 20);
-    const items = recentSessions(n);
+    const b = brainFor(DEFAULT_BRAIN);
+    const items = b.recentSessions ? await b.recentSessions(n) : [];
     if (!items.length) return say({ thread_ts: rootTs, text: 'No sessions found.' });
-    const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title}\n   \`${s.id}\`\n   ${s.agent || 'main'} · \`${s.cwd ? path.basename(s.cwd) : '~'}\` · ${rel(s.updatedAt)}`).join('\n\n');
-    return say({ thread_ts: rootTs, text: `*Recent Kiro sessions* (${items.length}):\n\n${body}\n\n_Continue any of them here with_ \`!teleport <sessionId>\`  ·  :lock: = currently open elsewhere` });
+    const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title}\n   \`${s.id || s.sessionId}\`\n   ${s.agent || b.id} · \`${s.cwd ? path.basename(s.cwd) : '~'}\` · ${rel(s.updatedAt)}`).join('\n\n');
+    return say({ thread_ts: rootTs, text: `*Recent ${brainLabel(b.id)} sessions* (${items.length}):\n\n${body}\n\n_Continue any of them here with_ \`!teleport <sessionId>\`  ·  :lock: = currently open elsewhere` });
   }
   if (lower.startsWith('!teleport')) {
     const id = (text.split(/\s+/)[1] || '').trim();
-    if (!id) return say({ thread_ts: rootTs, text: 'Usage: `!teleport <sessionId>` — pull any Kiro session into a Slack thread. See `!recent`.' });
-    const info = getSessionInfo(id);
-    const lockPid = sessionLock(id);
+    if (!id) return say({ thread_ts: rootTs, text: 'Usage: `!teleport <sessionId>` — pull any session from the default brain into a Slack thread. See `!recent`.' });
+    const b = brainFor(DEFAULT_BRAIN);
+    const info = b.getSessionInfo ? await b.getSessionInfo(id) : null;
+    const plan = b.prepareResume ? await b.prepareResume(id) : { action: 'ok' };
+    const lockPid = plan && plan.action === 'blocked' ? plan.pid : null;
     store.set(threadKey, {
+      brain: b.id,
       cwd: (info && info.cwd) || DEFAULT_CWD,
       agent: (info && info.agent) || DEFAULT_AGENT,
       model: DEFAULT_MODEL,
@@ -370,7 +396,7 @@ async function handleMessage({ message, say, client }) {
       announced: true,
     });
     const meta = info
-      ? `${info.title ? `*${info.title.slice(0, 70)}*\n` : ''}dir \`${path.basename(info.cwd || '~')}\` · agent \`${info.agent || 'main'}\``
+      ? `${info.title ? `*${info.title.slice(0, 70)}*\n` : ''}brain \`${b.id}\` · dir \`${path.basename(info.cwd || '~')}\` · agent \`${info.agent || 'default'}\``
       : '_(session file not found — using default dir; resume may start fresh)_';
     const lockWarn = lockPid
       ? `\n\n:warning: *This session is currently open in another process* (pid ${lockPid}) — likely a terminal/TUI. Continuing here at the same time will conflict and give stale replies. *Close it there first.*`
@@ -402,7 +428,7 @@ async function handleMessage({ message, say, client }) {
           // Immediately free the thread for new messages.
           running.delete(threadKey);
           aborted.add(threadKey);
-          // Kill process group (SIGTERM), escalate to SIGKILL after 3s.
+          // Kill process group when available (Kiro uses detached groups), otherwise kill child.
           try { process.kill(-c.pid, 'SIGTERM'); } catch (_) { try { c.kill('SIGTERM'); } catch (_) {} }
           setTimeout(() => {
             try { process.kill(-c.pid, 'SIGKILL'); } catch (_) { try { c.kill('SIGKILL'); } catch (_) {} }
@@ -420,16 +446,20 @@ async function handleMessage({ message, say, client }) {
           let turns = '';
           if (st.sessionId) {
             try {
-              const s = (await listSessions(st.cwd)).find((x) => x.sessionId === st.sessionId);
+              const s = (await listSessionsFor(st)).find((x) => x.sessionId === st.sessionId);
               if (s) turns = `\n• turns: \`${s.messageCount}\``;
             } catch (e) { /* ignore */ }
           }
-          return say({ thread_ts: rootTs, text: `*Session* (idle)\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• verbose: \`${st.verbose ? 'on' : 'off'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
+          return say({ thread_ts: rootTs, text: `*Session* (idle)\n• brain: \`${brainIdForState(st)}\`\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• provider: \`${st.provider || '(default)'}\`\n• verbose: \`${st.verbose ? 'on' : 'off'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
         }
         case 'model':
           if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!model <name>` (or `!model clear`)' });
           store.set(threadKey, { model: arg.toLowerCase() === 'clear' ? null : arg });
           return say({ thread_ts: rootTs, text: `🧠 Model → \`${arg.toLowerCase() === 'clear' ? '(default)' : arg}\` (applies to your next message).` });
+        case 'provider':
+          if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!provider <name>` (or `!provider clear`)' });
+          store.set(threadKey, { provider: arg.toLowerCase() === 'clear' ? null : arg });
+          return say({ thread_ts: rootTs, text: `🏷️ Provider → \`${arg.toLowerCase() === 'clear' ? '(default)' : arg}\` (applies to your next message).` });
         case 'agent':
           if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!agent <name>`' });
           store.set(threadKey, { agent: arg });
@@ -449,7 +479,7 @@ async function handleMessage({ message, say, client }) {
           return say({ thread_ts: rootTs, text: on ? '🗣️ Verbose ON — full tool trace shown for this session.' : '🤫 Verbose OFF — answers only (default).' });
         }
         default:
-          return say({ thread_ts: rootTs, text: 'In a thread: `!peek`, `!status`, `!abort`, `!model <name>`, `!agent <name>`, `!verbose`, `!clear`, `!end`. Anything else is a prompt.' });
+          return say({ thread_ts: rootTs, text: 'In a thread: `!peek`, `!status`, `!abort`, `!model <name>`, `!provider <name>`, `!agent <name>`, `!verbose`, `!clear`, `!end`. Anything else is a prompt.' });
       }
     }
     return runTurn({ threadKey, thread_ts: rootTs, reactTs: message.ts, channel, prompt: text, say, client });
@@ -461,7 +491,7 @@ async function handleMessage({ message, say, client }) {
     return startSession({ threadKey, rootTs: message.ts, reactTs: message.ts, channel, patch, prompt, say, client });
   }
   if (text.startsWith('!')) {
-    if (['!status', '!abort', '!model', '!agent', '!end', '!done'].includes(lower.split(/\s+/)[0])) {
+    if (['!status', '!abort', '!model', '!provider', '!agent', '!end', '!done'].includes(lower.split(/\s+/)[0])) {
       return say({ thread_ts: message.ts, text: 'That command works *inside a thread*. To start, just type your task.' });
     }
     return say({ thread_ts: message.ts, text: 'Unknown command. Just type a task to start a session, or `!help`.' });
@@ -475,8 +505,8 @@ async function handleMessage({ message, say, client }) {
     try { decision = await route(text, brokerCtx(), BROKER_MODEL); }
     catch (e) { console.log('[broker error]', e.message); }
     if (decision && decision.cwd) {
-      store.set(tkey, { cwd: decision.cwd, agent: decision.agent || DEFAULT_AGENT, model: decision.model || DEFAULT_MODEL, verbose: true, sessionId: null, announced: true });
-      await say({ thread_ts: rt, text: `:compass: *${decision.note || 'Routed'}*\ndir \`${path.basename(decision.cwd)}\` · agent \`${decision.agent || DEFAULT_AGENT}\`${decision.model ? ` · model \`${decision.model}\`` : ''}` });
+      store.set(tkey, { brain: DEFAULT_BRAIN, cwd: decision.cwd, agent: decision.agent || DEFAULT_AGENT, model: decision.model || DEFAULT_MODEL, verbose: true, sessionId: null, announced: true });
+      await say({ thread_ts: rt, text: `:compass: *${decision.note || 'Routed'}*\nbrain \`${DEFAULT_BRAIN}\` · dir \`${path.basename(decision.cwd)}\` · agent \`${decision.agent || DEFAULT_AGENT}\`${decision.model ? ` · model \`${decision.model}\`` : ''}` });
       if (decision.prompt) return runTurn({ threadKey: tkey, thread_ts: rt, reactTs: rt, channel, prompt: decision.prompt, say, client });
       return say({ thread_ts: rt, text: 'Reply in this thread to continue.' });
     }
@@ -497,10 +527,11 @@ app.message(async (args) => {
 });
 
 (async () => {
-  if (ALLOW_ALL) console.warn('⚠️  ALLOW-ALL mode: every user in this workspace can control Kiro on this machine.');
+  if (ALLOW_ALL) console.warn('⚠️  ALLOW-ALL mode: every user in this workspace can control AI CLIs on this machine.');
   await app.start();
-  console.log('⚡ Kiro Slack bridge running (Socket Mode) — thread = session.');
+  console.log('⚡ CLI Controller Slack bridge running (Socket Mode) — thread = session.');
   console.log('   Access:', ALLOW_ALL ? 'ALL users' : (ALLOWED.join(', ') || '(none)'));
+  console.log('   Default brain:', DEFAULT_BRAIN, '| available:', brains.listBrains().join(', '));
   console.log('   Trust tools:', TRUST_TOOLS === 'ALL' ? 'ALL (full autonomy)' : (TRUST_TOOLS || '(none)'));
   console.log('   Default agent:', DEFAULT_AGENT, '| dir:', DEFAULT_CWD, '| timeout(ms):', TIMEOUT_MS || 'none');
   const aliases = Object.keys(DIR_ALIASES);
@@ -508,7 +539,8 @@ app.message(async (args) => {
   console.log('   Broker:', BROKER_ON ? `on (${BROKER_MODEL})` : 'off');
   // Warm caches for the NL broker (best-effort, non-blocking).
   if (BROKER_ON) {
-    try { AGENTS_RAW = await listAgents(DEFAULT_CWD); } catch {}
-    try { MODELS_CACHE = await listModels(); } catch {}
+    const b = brainFor(DEFAULT_BRAIN);
+    try { AGENTS_RAW = b.listAgents ? await b.listAgents(DEFAULT_CWD) : ''; } catch {}
+    try { MODELS_CACHE = b.listModels ? await b.listModels() : []; } catch {}
   }
 })();

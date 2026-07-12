@@ -1,5 +1,6 @@
 # secrets — NEVER commit
 **/.env
+**/.env.backup-*
 # runtime / generated
 **/state.json
 **/macos-ca.pem

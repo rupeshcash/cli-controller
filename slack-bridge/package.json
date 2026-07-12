@@ -1,9 +1,9 @@
 {
-  "name": "kiro-slack-bridge",
+  "name": "cli-controller-slack-bridge",
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
-  "description": "Control kiro-cli from Slack (Socket Mode). Single-user, headless, safe.",
+  "description": "Control AI coding CLIs such as Kiro and Cline from Slack (Socket Mode). Single-user, headless, safe.",
   "scripts": {
     "start": "node src/index.js"
   },
