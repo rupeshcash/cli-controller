@@ -1,0 +1,15 @@
+# secrets — NEVER commit
+**/.env
+# runtime / generated
+**/state.json
+**/macos-ca.pem
+**/bridge.log
+**/bridge.pid
+**/panel.log
+**/panel.pid
+**/*.log
+# deps
+node_modules/
+**/node_modules/
+# OS
+.DS_Store

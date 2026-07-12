@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kiro · Control Panel</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0e1a;--surface:#111827;--surface-up:#1a2235;--surface-hover:#1b2438;
+  --border:#1e293b;--border-lit:#2d3a4f;
+  --text:#e6edf5;--text-dim:#7488a3;--text-muted:#4a5a72;
+  --accent:#06d6a0;--accent-2:#38bdf8;--accent-dim:#06d6a022;--glow:0 0 24px #06d6a01f;
+  --danger:#f43f5e;--warn:#f59e0b;
+  --fd:'Outfit',sans-serif;--fm:'JetBrains Mono',monospace;--r:12px;--rs:8px;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--fd);font-size:14px;line-height:1.6;min-height:100vh;
+  background-image:radial-gradient(1200px 600px at 80% -10%,#0d213033,transparent),url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.015'/%3E%3C/svg%3E")}
+a{color:var(--accent);text-decoration:none;cursor:pointer}
+code{font-family:var(--fm);font-size:.8em;background:var(--surface);padding:.15em .4em;border-radius:4px;color:var(--accent-2)}
+.shell{max-width:1300px;margin:0 auto;padding:1.75rem 2.25rem}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:.55rem}.brand svg{width:22px;height:22px}
+.brand h1{font-size:1.05rem;font-weight:700;letter-spacing:-.3px}.brand span{color:var(--text-dim);font-weight:300;margin-left:.3rem;font-size:.82rem}
+nav{display:flex;gap:.25rem;background:var(--surface);padding:.25rem;border-radius:10px;border:1px solid var(--border)}
+nav button{display:flex;align-items:center;gap:.4rem;background:none;border:none;color:var(--text-dim);font-family:var(--fd);font-size:.83rem;font-weight:500;padding:.45rem .9rem;border-radius:7px;cursor:pointer;transition:all .18s}
+nav button svg{width:15px;height:15px}
+nav button:hover{color:var(--text)}
+nav button.active{color:#04120c;background:var(--accent);font-weight:600}
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.1rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:1.4rem;transition:border-color .2s,box-shadow .2s,transform .2s}
+.card:hover{border-color:var(--border-lit);box-shadow:var(--glow)}
+.card-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.9px;color:var(--text-muted);margin-bottom:.5rem;font-weight:600}
+.card-value{font-size:2.1rem;font-weight:700;font-family:var(--fm);display:flex;align-items:center}
+.card-sub{font-size:.74rem;color:var(--text-dim);margin-top:.3rem}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:.5rem;animation:pulse 2s infinite}
+.dot-on{background:var(--accent);box-shadow:0 0 10px var(--accent)}.dot-off{background:var(--danger);box-shadow:0 0 10px var(--danger);animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th{text-align:left;padding:.7rem 1rem;font-size:.67rem;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);border-bottom:1px solid var(--border);font-weight:600;white-space:nowrap;cursor:pointer;user-select:none;transition:color .15s;position:sticky;top:0;background:var(--surface)}
+th.sortable:hover{color:var(--text)}
+th .arr{display:inline-block;width:10px;margin-left:.25rem;opacity:.35;transition:opacity .15s}
+th.active-sort{color:var(--accent)}th.active-sort .arr{opacity:1;color:var(--accent)}
+td{padding:.68rem 1rem;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr{cursor:pointer;transition:background .1s}tbody tr:hover td{background:var(--surface-hover)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:.2em .55em;border-radius:5px;font-size:.68rem;font-weight:600;font-family:var(--fm)}
+.b-slack{background:#0c2b45;color:#7dd3fc}.b-term{background:#1e293b;color:#94a3b8}
+.b-kiro{background:#0d2f24;color:#5eead4}.b-cline{background:#2a1e3d;color:#c4b5fd}
+.composer{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:1.2rem;margin-bottom:1.2rem}
+.composer .row{display:flex;gap:.55rem;flex-wrap:wrap;margin-bottom:.7rem}
+.composer textarea{width:100%;min-height:90px;font-family:var(--fm);font-size:.82rem;padding:.7rem;background:var(--surface-up);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);outline:none;resize:vertical}
+.composer textarea:focus{border-color:var(--accent)}
+.timeline{background:#060a12;border:1px solid var(--border);border-radius:var(--rs);padding:1rem;font-family:var(--fm);font-size:.75rem;line-height:1.8;color:var(--text-dim);white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto}
+.tl-run{color:var(--accent-2)}.tl-done{color:var(--accent)}.tl-err{color:var(--danger)}.tl-warn{color:var(--warn)}
+.cap-off{opacity:.4;pointer-events:none}
+.meter{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-family:var(--fm)}
+.meter-bar{width:52px;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+.meter-fill{height:100%;border-radius:3px}
+.lo .meter-fill{background:var(--accent)}.mid .meter-fill{background:var(--warn)}.hi .meter-fill{background:var(--danger)}
+.toolbar{display:flex;gap:.55rem;flex-wrap:wrap;align-items:center;margin-bottom:1.1rem}
+.field{position:relative;display:inline-flex;align-items:center}
+.field svg{position:absolute;left:.6rem;width:14px;height:14px;color:var(--text-muted);pointer-events:none}
+select,input.search{font-family:var(--fd);font-size:.8rem;padding:.5rem .7rem .5rem 2rem;background:var(--surface-up);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);outline:none;transition:border-color .15s;appearance:none;cursor:pointer}
+input.search{cursor:text;min-width:200px}
+select:focus,input.search:focus{border-color:var(--accent)}
+select{padding-right:1.8rem;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='none' stroke='%237488a3' stroke-width='2'%3E%3Cpath d='M2 3l3 3 3-3'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right .6rem center}
+.count{margin-left:auto;font-size:.72rem;color:var(--text-dim);font-family:var(--fm)}
+.btn{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--fd);font-size:.8rem;font-weight:500;padding:.5rem .9rem;border:1px solid var(--border);border-radius:var(--rs);background:var(--surface-up);color:var(--text);cursor:pointer;transition:all .15s}
+.btn svg{width:14px;height:14px}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:#04120c;font-weight:600}.btn-accent:hover{color:#04120c;opacity:.9}
+.copy-btn{display:inline-flex;align-items:center;gap:3px;font-family:var(--fm);font-size:.68rem;padding:.25rem .5rem;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text-dim);cursor:pointer;transition:all .15s}
+.copy-btn svg{width:12px;height:12px}.copy-btn:hover{border-color:var(--accent);color:var(--accent)}
+.log{background:#060a12;border:1px solid var(--border);border-radius:var(--rs);padding:1rem;max-height:360px;overflow:auto;font-family:var(--fm);font-size:.72rem;line-height:1.7;color:var(--text-dim);white-space:pre-wrap;word-break:break-all}
+.detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem;margin-bottom:1.4rem}
+.detail-item .label{font-size:.64rem;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:.2rem}
+.detail-item .val{font-size:.88rem;font-weight:500}
+.resume-box{display:flex;align-items:center;gap:1rem;background:var(--surface-up);border:1px solid var(--border);border-radius:var(--rs);padding:.75rem 1.15rem;margin-bottom:1.4rem}
+.resume-box code{flex:1;font-size:.76rem;color:var(--text);background:none;padding:0}
+.thread{display:grid;grid-template-columns:1fr auto auto;gap:1rem;align-items:center;padding:.85rem 1.15rem;border-bottom:1px solid var(--border);transition:background .1s}
+.thread:last-child{border-bottom:none}.thread:hover{background:var(--surface-hover)}
+.thread-title{font-weight:500;font-size:.85rem;margin-bottom:.15rem}.thread-meta{font-size:.71rem;color:var(--text-dim);font-family:var(--fm)}
+.empty{text-align:center;padding:2.5rem;color:var(--text-dim);font-style:italic}
+.back{display:inline-flex;align-items:center;gap:.3rem;font-size:.8rem;color:var(--text-dim);cursor:pointer;margin-bottom:1rem}.back:hover{color:var(--accent)}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+#app{animation:fade .22s ease-out}
+.sec-title{font-size:.9rem;font-weight:600;margin-bottom:.9rem;color:var(--text)}
+</style>
+</head>
+<body>
+<div class="shell">
+<header>
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    <h1>Kiro<span>Control Panel</span></h1>
+  </div>
+  <nav id="nav"></nav>
+</header>
+<main id="app"></main>
+</div>
+<script>
+const $=id=>document.getElementById(id),app=$('app');
+const api=async(u,m)=>{const r=await fetch(u,m?{method:'POST'}:void 0);return r.json()};
+const ago=d=>{if(!d)return'—';const s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d'};
+const esc=s=>(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const ic={dash:'<path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>',list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',bridge:'<path d="M4 7v10M20 7v10M4 12h16M8 12V8M16 12V8M8 12v4M16 12v4"/>',copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/>',filter:'<path d="M3 4h18l-7 8v6l-4 2v-8z"/>',sort:'<path d="M3 6h18M6 12h12M9 18h6"/>',back:'<path d="M19 12H5M12 19l-7-7 7-7"/>',play:'<path d="M6 4l14 8-14 8z"/>',stop:'<rect x="5" y="5" width="14" height="14" rx="2"/>',restart:'<path d="M4 12a8 8 0 018-8 8 8 0 017 4M20 4v4h-4"/><path d="M20 12a8 8 0 01-8 8 8 8 0 01-7-4M4 20v-4h4"/>'};
+const svg=(p,c='')=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${c}">${p}</svg>`;
+const srcB=s=>s==='slack'?'<span class="badge b-slack">slack</span>':'<span class="badge b-term">terminal</span>';
+const brainB=b=>`<span class="badge b-${b==='cline'?'cline':'kiro'}">${b||'kiro'}</span>`;
+const postJSON=async(u,body)=>{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});return r.json()};
+const meter=p=>{if(p==null)return'<span class="meter">—</span>';const c=p>80?'hi':p>50?'mid':'lo';return`<span class="meter ${c}"><span class="meter-bar"><span class="meter-fill" style="width:${p}%"></span></span>${p}%</span>`};
+const copyBtn=t=>`<button class="copy-btn" onclick="event.stopPropagation();navigator.clipboard.writeText(\`${t.replace(/`/g,'\\`')}\`);const o=this.innerHTML;this.innerHTML='✓';setTimeout(()=>this.innerHTML=o,1000)">${svg(ic.copy)}copy</button>`;
+const rcmd=(cwd,agent,id)=>`cd ${cwd||'~'} && kiro-cli chat${agent?' --agent '+agent:''} --resume-id ${id}`;
+
+let curView='dash';
+const NAV=[['dash','Dashboard',ic.dash],['sessions','Sessions',ic.list],['chat','Chat',ic.play],['bridge','Bridge',ic.bridge]];
+$('nav').innerHTML=NAV.map(([k,l,i])=>`<button id="n-${k}" onclick="go('${k}')">${svg(i)}${l}</button>`).join('');
+function setNav(){document.querySelectorAll('#nav button').forEach(b=>b.classList.remove('active'));const k=curView==='detail'?'sessions':curView;const n=$('n-'+k);if(n)n.classList.add('active')}
+
+// ── Generic sortable table ──
+function sortData(rows,key,dir,type){
+  const m=dir==='asc'?1:-1;
+  return [...rows].sort((a,b)=>{
+    let x=a[key],y=b[key];
+    if(type==='num'){x=x==null?-Infinity:x;y=y==null?-Infinity:y;return(x-y)*m}
+    x=(x||'').toString().toLowerCase();y=(y||'').toString().toLowerCase();
+    return x<y?-1*m:x>y?1*m:0;
+  });
+}
+function th(cols,sort){return'<tr>'+cols.map(c=>{
+  if(!c.key)return`<th>${c.label||''}</th>`;
+  const act=sort.key===c.key;const arr=act?(sort.dir==='asc'?'▲':'▼'):'↕';
+  return`<th class="sortable${act?' active-sort':''}" onclick="onSort('${c.key}','${c.type||'str'}')">${c.label}<span class="arr">${arr}</span></th>`;
+}).join('')+'</tr>'}
+
+// ── SESSIONS ──
+let SESS=[],sSort={key:'updatedAt',dir:'desc',type:'num2date'},sSrc='all',sAgent='all',sBrain='all',sQ='';
+async function loadSessions(){SESS=await api('/api/sessions?sort=updated')}
+function sessCols(){return[
+  {key:'title',label:'Title'},{key:'brain',label:'Brain'},{key:'source',label:'Source'},{key:'agent',label:'Agent'},
+  {key:'cwdShort',label:'Dir'},{key:'contextPct',label:'Context',type:'num'},
+  {key:'messages',label:'Msgs',type:'num'},{key:'updatedAt',label:'Active',type:'num'},{label:''}];}
+function onSort(key,type){if(sSort.key===key)sSort.dir=sSort.dir==='asc'?'desc':'asc';else{sSort={key,dir:type==='num'?'desc':'asc',type}}
+  if(curView==='sessions')paintSessions();else if(curView==='bridge')paintThreads();}
+function filteredSess(){let r=SESS.slice();
+  if(sSrc!=='all')r=r.filter(s=>s.source===sSrc);
+  if(sBrain!=='all')r=r.filter(s=>(s.brain||'kiro')===sBrain);
+  if(sAgent!=='all')r=r.filter(s=>(s.agent||'')===sAgent);
+  if(sQ){const q=sQ.toLowerCase();r=r.filter(s=>(s.title+' '+(s.cwd||'')+' '+(s.brain||'')).toLowerCase().includes(q))}
+  const type=sSort.type==='num'?'num':(sSort.key==='updatedAt'||sSort.key==='createdAt'?'num':'str');
+  return sortData(r, sSort.key, sSort.dir, sSort.key==='contextPct'||sSort.key==='messages'?'num':'str');}
+function paintSessions(){
+  const data=filteredSess();
+  const agents=[...new Set(SESS.map(s=>s.agent).filter(Boolean))].sort();
+  $('sess-count').textContent=data.length+' sessions';
+  $('sess-agent').innerHTML='<option value="all">All agents</option>'+agents.map(a=>`<option value="${a}"${sAgent===a?' selected':''}>${a}</option>`).join('');
+  $('sess-head').innerHTML=th(sessCols(),sSort);
+  $('sess-body').innerHTML=data.map(s=>`<tr onclick="showDetail('${s.id}')">
+    <td>${esc(s.title.slice(0,44))}</td><td>${brainB(s.brain)}</td><td>${srcB(s.source)}</td><td><code>${s.agent||'—'}</code></td>
+    <td title="${esc(s.cwd)}"><code>${s.cwdShort||'—'}</code></td><td>${meter(s.contextPct)}</td>
+    <td>${s.messages||'—'}</td><td style="color:var(--text-dim)">${ago(s.updatedAt)}</td><td>${copyBtn(rcmd(s.cwd, s.agent, s.id))}</td></tr>`).join('')||'<tr><td colspan="9" class="empty">No sessions match.</td></tr>';
+}
+async function renderSessions(){
+  if(!SESS.length)await loadSessions();
+  app.innerHTML=`
+  <div class="toolbar">
+    <span class="field">${svg(ic.filter)}<select onchange="sBrain=this.value;paintSessions()"><option value="all">All brains</option><option value="kiro"${sBrain==='kiro'?' selected':''}>Kiro</option><option value="cline"${sBrain==='cline'?' selected':''}>Cline</option></select></span>
+    <span class="field">${svg(ic.filter)}<select onchange="sSrc=this.value;paintSessions()"><option value="all">All sources</option><option value="terminal"${sSrc==='terminal'?' selected':''}>Terminal</option><option value="slack"${sSrc==='slack'?' selected':''}>Slack</option></select></span>
+    <span class="field">${svg(ic.dash)}<select id="sess-agent" onchange="sAgent=this.value;paintSessions()"></select></span>
+    <span class="field">${svg(ic.search)}<input class="search" placeholder="Search title or path…" value="${esc(sQ)}" oninput="sQ=this.value;clearTimeout(this._t);this._t=setTimeout(paintSessions,200)"></span>
+    <span class="count" id="sess-count"></span>
+  </div>
+  <div class="table-wrap"><table><thead id="sess-head"></thead><tbody id="sess-body"></tbody></table></div>`;
+  paintSessions();
+}
+
+// ── DASHBOARD ──
+async function renderDash(){
+  const d=await api('/api/status');if(!SESS.length)await loadSessions();
+  const recent=sortData(SESS,'updatedAt','desc','num').slice(0,10);
+  app.innerHTML=`
+  <div class="grid-3" style="margin-bottom:1.75rem">
+    <div class="card"><div class="card-label">Bridge</div><div class="card-value"><span class="dot ${d.bridge.running?'dot-on':'dot-off'}"></span>${d.bridge.running?'Online':'Offline'}</div><div class="card-sub">${d.bridge.pid?'PID '+d.bridge.pid:'—'}</div></div>
+    <div class="card"><div class="card-label">Sessions</div><div class="card-value">${d.sessions}</div><div class="card-sub">across all sources</div></div>
+    <div class="card"><div class="card-label">Slack Threads</div><div class="card-value">${d.threads}</div><div class="card-sub">active conversations</div></div>
+  </div>
+  <div class="sec-title">Recent Activity</div>
+  <div class="table-wrap"><table><thead><tr><th>Session</th><th>Source</th><th>Agent</th><th>Dir</th><th>Context</th><th>Active</th></tr></thead><tbody>
+  ${recent.map(s=>`<tr onclick="showDetail('${s.id}')"><td>${esc(s.title.slice(0,44))}</td><td>${srcB(s.source)}</td><td><code>${s.agent||'—'}</code></td><td><code>${s.cwdShort||'—'}</code></td><td>${meter(s.contextPct)}</td><td style="color:var(--text-dim)">${ago(s.updatedAt)}</td></tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+// ── DETAIL ──
+async function showDetail(id){curView='detail';setNav();const d=await api('/api/sessions/'+id);
+  app.innerHTML=`<span class="back" onclick="go('sessions')">${svg(ic.back)}Sessions</span>
+  <h2 style="font-size:1.15rem;margin-bottom:1.2rem;font-weight:600">${esc(d.title)}</h2>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Source</div><div class="val">${srcB(d.source)}</div></div>
+    <div class="detail-item"><div class="label">Agent</div><div class="val"><code>${d.agent||'default'}</code></div></div>
+    <div class="detail-item"><div class="label">Model</div><div class="val"><code>${d.model||'auto'}</code></div></div>
+    <div class="detail-item"><div class="label">Context</div><div class="val">${meter(d.contextPct)}</div></div>
+    <div class="detail-item"><div class="label">Messages</div><div class="val">${d.messages}</div></div>
+    <div class="detail-item"><div class="label">Directory</div><div class="val"><code style="font-size:.7rem">${esc(d.cwd||'~')}</code></div></div>
+    <div class="detail-item"><div class="label">Created</div><div class="val">${ago(d.createdAt)} ago</div></div>
+    <div class="detail-item"><div class="label">Active</div><div class="val">${ago(d.updatedAt)} ago</div></div>
+  </div>
+  <div class="resume-box"><code>${esc(d.resumeCmd)}</code><button class="btn" onclick="openChat({brain:'kiro',cwd:'${(d.cwd||'').replace(/'/g,"\\'")}',agent:'${(d.agent||'').replace(/'/g,"\\'")}',sessionId:'${d.id}'})">${svg(ic.play)}Continue here</button><button class="btn btn-accent" onclick="navigator.clipboard.writeText(\`${d.resumeCmd.replace(/`/g,'\\`')}\`);this.textContent='✓ copied';setTimeout(()=>this.textContent='copy command',1200)">copy command</button></div>
+  ${d.preview&&d.preview.total?`<div class="sec-title">Conversation · ${d.preview.total} messages</div><div class="log">${[...(d.preview.first||[]),...(d.preview.last||[])].map(m=>esc(JSON.stringify(m).slice(0,220))).join('\n')}</div>`:''}`;
+}
+
+// ── CHAT (start / continue a session via core) ──
+let BRAINS_CACHE=null,chatPrefill=null,_statusEl=null;
+async function brainsList(){if(!BRAINS_CACHE)BRAINS_CACHE=await api('/api/brains');return BRAINS_CACHE}
+function openChat(pf){chatPrefill=pf||null;go('chat')}
+function capApply(){const b=(BRAINS_CACHE||[]).find(x=>x.id===($('c-brain')||{}).value)||{capabilities:{}};
+  const ag=$('c-agent'),md=$('c-model');if(ag)ag.style.display=b.capabilities.agents?'':'none';if(md)md.style.display=b.capabilities.models?'':'none'}
+function tl(t,cls){const b=$('c-timeline');if(!b)return;if(b.dataset.empty!=='0'){b.innerHTML='';b.dataset.empty='0'}b.innerHTML+=`<div class="${cls?'tl-'+cls:''}">${esc(t)}</div>`;b.scrollTop=b.scrollHeight}
+function statusTick(t){const b=$('c-timeline');if(!b)return;if(b.dataset.empty!=='0'){b.innerHTML='';b.dataset.empty='0'}if(!_statusEl){_statusEl=document.createElement('div');_statusEl.className='tl-run';b.appendChild(_statusEl)}_statusEl.textContent=t;b.scrollTop=b.scrollHeight}
+async function runChat(){
+  const brain=$('c-brain').value,cwd=$('c-dir').value.trim(),agent=($('c-agent')||{}).value||'',model=($('c-model')||{}).value||'',prompt=$('c-prompt').value.trim();
+  const sessionId=(chatPrefill&&chatPrefill.sessionId)||null;
+  if(!cwd||!prompt){tl('⚠ workspace dir and prompt are required','warn');return}
+  _statusEl=null;tl(`▸ starting ${brain} in ${cwd}${sessionId?' · resume '+sessionId.slice(0,10)+'…':''}`,'run');
+  const r=await postJSON('/api/run',{brain,cwd,agent,model,sessionId,prompt});
+  if(r.error){tl('✗ '+r.error,'err');return}
+  const es=new EventSource('/api/runs/'+r.runId+'/events');
+  es.onmessage=e=>{const d=JSON.parse(e.data);
+    if(d.status==='running')statusTick(`▸ working… ${Math.floor(d.elapsedMs/1000)}s elapsed`);
+    else if(d.status==='blocked'){_statusEl=null;tl('⚠ '+((d.blocked&&d.blocked.reason)||'session is open elsewhere')+' — close it there, or start a fresh session.','warn');es.close()}
+    else if(d.status==='done'){_statusEl=null;tl(`▸ done in ${Math.floor(d.elapsedMs/1000)}s${d.sessionId?' · session '+esc(String(d.sessionId).slice(0,16))+'…':''}`,'done');if(d.output)tl('\n'+d.output);es.close();SESS=[]}
+    else if(d.status==='error'){_statusEl=null;tl('✗ '+(d.error||'run failed'),'err');es.close()}
+  };
+  es.onerror=()=>es.close();
+}
+async function renderChat(){
+  const bl=await brainsList();const pf=chatPrefill||{};const cur=pf.brain||bl[0].id;
+  app.innerHTML=`
+  <div class="composer">
+    <div class="row">
+      <select id="c-brain" onchange="capApply();$('c-prompt').placeholder='What should '+this.value+' do?'">${bl.map(b=>`<option value="${b.id}"${b.id===cur?' selected':''}>${b.displayName}</option>`).join('')}</select>
+      <input class="search" id="c-dir" placeholder="/path/to/workspace" value="${esc(pf.cwd||'')}" ${pf.sessionId?'readonly':''} style="flex:1;min-width:260px">
+      <input class="search" id="c-agent" placeholder="agent (e.g. main)" value="${esc(pf.agent||'')}">
+      <input class="search" id="c-model" placeholder="model (optional)">
+    </div>
+    <textarea id="c-prompt" placeholder="What should ${cur} do?"></textarea>
+    <div class="row" style="margin-top:.7rem;align-items:center">
+      <button class="btn btn-accent" onclick="runChat()">${svg(ic.play)}${pf.sessionId?'Continue':'Run'}</button>
+      ${pf.sessionId?`<span style="color:var(--text-dim);font-size:.78rem">continuing <code>${esc(pf.sessionId.slice(0,18))}…</code></span>`:'<span style="color:var(--text-dim);font-size:.78rem">starts a new session</span>'}
+    </div>
+  </div>
+  <div class="sec-title">Run timeline <span style="font-weight:400;color:var(--text-muted);font-size:.72rem">· lifecycle + elapsed (full output arrives at completion — CLIs don't stream over a pipe)</span></div>
+  <div class="timeline" id="c-timeline" data-empty="1">Configure a session above and hit ${pf.sessionId?'Continue':'Run'}.</div>`;
+  capApply();
+}
+
+// ── BRIDGE ──
+let TH=[],tSort={key:'lastActive',dir:'desc'},logF='';
+function threadCols(){return[{key:'title',label:'Thread'},{key:'messages',label:'Msgs',type:'num'},{key:'lastActive',label:'Active'},{label:''}]}
+function paintThreads(){
+  const type=tSort.key==='messages'?'num':'str';
+  const data=sortData(TH,tSort.key,tSort.dir,type);
+  $('th-count').textContent=data.length;
+  $('th-head').innerHTML=th(threadCols(),tSort);
+  $('th-body').innerHTML=data.length?data.map(t=>`<tr>
+    <td><div class="thread-title">${esc(t.title)||'<span style="opacity:.3">Untitled</span>'}</div><div class="thread-meta">${t.agent||'main'} · ${t.cwdShort||'—'}</div></td>
+    <td>${t.messages||'—'}</td><td style="color:var(--text-dim)">${ago(t.lastActive)}</td>
+    <td>${t.sessionId?copyBtn(rcmd(t.cwd, t.agent, t.sessionId)):''}</td></tr>`).join(''):'<tr><td colspan="4" class="empty">No active threads</td></tr>';
+}
+function onSortTh(key,type){if(tSort.key===key)tSort.dir=tSort.dir==='asc'?'desc':'asc';else tSort={key,dir:type==='num'?'desc':'asc'};paintThreads()}
+async function renderBridge(){
+  const st=await api('/api/status');TH=await api('/api/bridge/threads');const lg=await api('/api/bridge/logs?n=60&filter='+encodeURIComponent(logF));
+  app.innerHTML=`
+  <div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
+    <span class="dot ${st.bridge.running?'dot-on':'dot-off'}"></span><span style="font-weight:600">${st.bridge.running?'Online':'Offline'}</span>
+    ${st.bridge.pid?`<code>PID ${st.bridge.pid}</code>`:''}
+    <div style="margin-left:auto;display:flex;gap:.5rem">
+      <button class="btn" onclick="bCmd('start')">${svg(ic.play)}Start</button>
+      <button class="btn" onclick="bCmd('stop')">${svg(ic.stop)}Stop</button>
+      <button class="btn" onclick="bCmd('restart')">${svg(ic.restart)}Restart</button>
+    </div>
+  </div>
+  <div class="sec-title">Active Slack Threads · <span id="th-count"></span></div>
+  <div class="table-wrap" style="margin-bottom:1.5rem"><table><thead id="th-head"></thead><tbody id="th-body"></tbody></table></div>
+  <div class="sec-title">Logs</div>
+  <div class="toolbar"><span class="field" style="flex:1">${svg(ic.search)}<input class="search" style="width:100%" placeholder="Filter logs…" value="${esc(logF)}" oninput="logF=this.value;clearTimeout(this._t);this._t=setTimeout(refLog,350)"></span></div>
+  <div class="log" id="logbox">${lg.lines.map(esc).join('\n')}</div>`;
+  window.onSort=onSortTh;paintThreads();
+}
+async function refLog(){const l=await api('/api/bridge/logs?n=60&filter='+encodeURIComponent(logF));const b=$('logbox');if(b)b.innerHTML=l.lines.map(esc).join('\n')}
+async function bCmd(c){await api('/api/bridge/'+c,true);setTimeout(renderBridge,2500)}
+
+function go(v){curView=v;setNav();window.onSort=onSort;
+  if(v==='dash')renderDash();else if(v==='sessions')renderSessions();else if(v==='chat')renderChat();else if(v==='bridge')renderBridge();}
+go('dash');
+</script>
+</body>
+</html>
