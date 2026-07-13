@@ -29,8 +29,10 @@ function runKiro({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs =
   return new Promise((resolve) => {
     let child;
     try {
+      // detached only on POSIX (enables !abort group-kill); on Windows it strips kiro-cli's console handles → "handle is invalid (os error 6)".
+      const posix = process.platform !== 'win32';
       child = spawn(BIN(), buildArgs({ sessionId, agent, model, trustTools }), {
-        cwd: cwd || process.cwd(), env: process.env, detached: true,
+        cwd: cwd || process.cwd(), env: process.env, detached: posix, windowsHide: true,
       });
     } catch (e) {
       return resolve({ ok: false, output: '', error: `Failed to start ${BIN()}: ${e.message}`, code: -1 });

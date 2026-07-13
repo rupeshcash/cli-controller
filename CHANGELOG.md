@@ -17,5 +17,10 @@ All notable changes to this project. Format loosely follows Keep a Changelog; ve
 ### Security
 - Safe defaults: self-only allow-list, opt-in tool trust, `127.0.0.1`-only cockpit, secrets in a 0600 `.env`, stdin-fed prompts, no-shell spawns. See `SECURITY.md`.
 
+## [0.1.1]
+
+### Fixed
+- **Windows:** Kiro turns from the bridge failed with `The handle is invalid. (os error 6)` — the child was spawned `detached`, which strips console/std handles on Windows, so `kiro-cli` died before a session was created. `detached` is now POSIX-only (still powers `!abort` group-kill on macOS/Linux); Windows spawns with `windowsHide` instead. No behavior change on macOS/Linux.
+
 ## [0.1.0]
 - Initial Slack↔Kiro bridge + web control panel.
