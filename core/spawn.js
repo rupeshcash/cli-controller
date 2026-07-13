@@ -29,13 +29,19 @@ function resolveCommand(command) {
 }
 
 function normalizeSpawn(command, args = []) {
-  const resolved = resolveCommand(command);
-  const ext = path.extname(resolved || '').toLowerCase();
-  if (process.platform === 'win32' && (ext === '.cmd' || ext === '.bat')) {
-    return { command: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', '"' + resolved + '"', ...args] };
+  const ext = path.extname(command || '').toLowerCase();
+  // JS-based bins (no native executable) must run through the Node runtime.
+  if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
+    return { command: process.execPath, args: [command, ...args] };
   }
-  if (ext === '.js' || ext === '.mjs' || ext === '.cjs') return { command: process.execPath, args: [resolved, ...args] };
-  return { command: resolved, args };
+  // Windows: route through cmd.exe, which resolves .exe/.cmd/.bat shims via PATHEXT.
+  // We pass the command NAME, never a PATH-derived absolute path, so spawn is never
+  // handed an environment-controlled absolute path (CodeQL js/shell-command-injection-from-environment).
+  if (process.platform === 'win32') {
+    return { command: 'cmd.exe', args: ['/d', '/s', '/c', command, ...args] };
+  }
+  // POSIX: spawn (shell:false) resolves a bare name via PATH itself; an explicit path is used as-is.
+  return { command, args };
 }
 
 function spawnCli(command, args = [], options = {}) {
