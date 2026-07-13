@@ -1,10 +1,11 @@
-// core/spawn.js — cross-platform helpers for spawning installed CLI binaries.
-// On Windows, npm package bins are often .cmd shims or JS files without a native
-// executable bit. Normalize those forms so adapters can use spawn without shell.
+// core/spawn.js — cross-platform CLI spawning.
+// Uses cross-spawn so Windows npm `.cmd`/`.bat` shims launch correctly and args
+// (like the prompt) are escaped properly through the cmd.exe hand-off — hand-rolling
+// that quoting drops/mangles args (e.g. cline: "Unknown command or unquoted prompt").
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, spawnSync } = require('child_process');
+const crossSpawn = require('cross-spawn');
 
 function pathExts() {
   return process.platform === 'win32'
@@ -22,6 +23,8 @@ function candidatePaths(command) {
   return dirs.flatMap((dir) => names.map((name) => path.join(dir, name)));
 }
 
+// Best-effort resolve to a concrete binary path — used for DISPLAY only (resume strings),
+// never handed to the spawner (cross-spawn does its own resolution safely).
 function resolveCommand(command) {
   for (const c of candidatePaths(command)) {
     try { if (c && fs.existsSync(c) && fs.statSync(c).isFile()) return c; } catch {}
@@ -29,27 +32,10 @@ function resolveCommand(command) {
   return command;
 }
 
-function normalizeSpawn(command, args = []) {
-  const ext = path.extname(command || '').toLowerCase();
-  // JS-based bins (no native executable) must run through the Node runtime.
-  if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
-    return { command: process.execPath, args: [command, ...args] };
-  }
-  // Windows: route through cmd.exe, which resolves .exe/.cmd/.bat shims via PATHEXT.
-  // Use ComSpec (the full path to cmd.exe) so spawn can actually find it, and pass the
-  // command NAME (never a PATH-derived absolute path) so we don't hand spawn an
-  // uncontrolled absolute path (CodeQL js/shell-command-injection-from-environment).
-  if (process.platform === 'win32') {
-    return { command: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', command, ...args] };
-  }
-  // POSIX: spawn (shell:false) resolves a bare name via PATH itself; an explicit path is used as-is.
-  return { command, args };
-}
-
 // A cwd that doesn't exist makes Windows spawn fail with a misleading "spawn <cmd> ENOENT".
 // Fall back to home so a stale/relocated session dir degrades gracefully instead of hard-failing.
 function safeOptions(options = {}) {
-  const opts = { ...options, shell: false };
+  const opts = { ...options };
   if (opts.cwd && !fs.existsSync(opts.cwd)) {
     console.warn(`[spawn] cwd does not exist: ${opts.cwd} — falling back to ${os.homedir()}`);
     opts.cwd = os.homedir();
@@ -58,13 +44,11 @@ function safeOptions(options = {}) {
 }
 
 function spawnCli(command, args = [], options = {}) {
-  const n = normalizeSpawn(command, args);
-  return spawn(n.command, n.args, safeOptions(options));
+  return crossSpawn(command, args, safeOptions(options));
 }
 
 function spawnCliSync(command, args = [], options = {}) {
-  const n = normalizeSpawn(command, args);
-  return spawnSync(n.command, n.args, safeOptions(options));
+  return crossSpawn.sync(command, args, safeOptions(options));
 }
 
-module.exports = { candidatePaths, resolveCommand, normalizeSpawn, spawnCli, spawnCliSync };
+module.exports = { candidatePaths, resolveCommand, spawnCli, spawnCliSync };

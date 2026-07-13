@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { candidatePaths, resolveCommand, normalizeSpawn } = require('../core/spawn');
+const { candidatePaths, resolveCommand, spawnCli } = require('../core/spawn');
 
 test('candidatePaths includes PATH candidates for bare commands', () => {
   const old = process.env.PATH;
@@ -25,10 +25,11 @@ test('resolveCommand prefers an existing concrete binary', () => {
   finally { process.env.PATH = old; }
 });
 
-test('normalizeSpawn runs JS npm bins through node', () => {
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-js-')), 'cli.js');
-  fs.writeFileSync(file, 'console.log("ok")');
-  const n = normalizeSpawn(file, ['--version']);
-  assert.equal(n.command, process.execPath);
-  assert.deepEqual(n.args, [file, '--version']);
+test('spawnCli passes args through intact (prompt survives)', async () => {
+  // node -e echoes its argv[1]; proves an arg with spaces reaches the child unmangled.
+  const p = spawnCli(process.execPath, ['-e', 'process.stdout.write(process.argv[1])', 'hey there world']);
+  let out = '';
+  p.stdout.on('data', (d) => { out += d.toString(); });
+  await new Promise((r) => p.on('close', r));
+  assert.equal(out, 'hey there world');
 });
