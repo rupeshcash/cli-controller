@@ -7,9 +7,10 @@ const { spawnCli, spawnCliSync, resolveCommand } = require('../spawn');
 
 const BIN = () => process.env.CLINE_BIN || 'cline';
 
-function buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs }) {
+function buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs, plan }) {
   const autoApprove = (trustTools || '').toUpperCase() === 'ALL'; // map our trust → Cline auto-approve
   const args = ['-c', cwd || process.cwd(), '--json', '--auto-approve', String(autoApprove)];
+  if (plan) args.push('-p'); // plan mode (default is act)
   if (sessionId) args.push('--id', sessionId);
   if (model) args.push('-m', model);
   if (provider) args.push('-P', provider);
@@ -45,20 +46,24 @@ function parseJsonl(stdout) {
   }
   const finished = runResult && runResult.finishReason;
   const isError = !runResult || finished === 'error';
+  const rr = runResult || {};
+  const u = rr.aggregateUsage || rr.usage || null;
   return {
     ok: !isError,
-    text: (runResult && runResult.text) || '',
-    sessionId: (runResult && runResult.taskId) || null,
-    error: errorMsg || (isError && runResult ? runResult.text : '') || '',
+    text: rr.text || '',
+    sessionId: rr.taskId || null,
+    error: errorMsg || (isError && rr.text) || '',
+    usage: u ? { input: u.inputTokens || 0, output: u.outputTokens || 0, cost: typeof u.totalCost === 'number' ? u.totalCost : null } : null,
+    model: (rr.model && (rr.model.id || rr.model.model)) || (typeof rr.model === 'string' ? rr.model : null),
     events,
   };
 }
 
 // Run one turn. Prompt via positional arg — verified: Cline reads the prompt from argv;
 // its "piped stdin" mode is only for the `hook` subcommand, not the prompt.
-function runCline({ cwd, sessionId, model, provider, trustTools, prompt, timeoutMs = 0, onSpawn, onData }) {
+function runCline({ cwd, sessionId, model, provider, trustTools, prompt, timeoutMs = 0, plan, onSpawn, onData }) {
   return new Promise((resolve) => {
-    const args = buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs });
+    const args = buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs, plan });
     args.push(prompt || '');
     let child;
     try { child = spawnCli(BIN(), args, { cwd: cwd || process.cwd(), env: process.env }); }
@@ -76,6 +81,8 @@ function runCline({ cwd, sessionId, model, provider, trustTools, prompt, timeout
         error: parsed.error || (code !== 0 ? (err.trim() || `cline exited with code ${code}`) : ''),
         code,
         sessionId: parsed.sessionId || undefined,
+        usage: parsed.usage || undefined,
+        model: parsed.model || undefined,
       });
     });
   });
@@ -103,7 +110,7 @@ function isInstalled() {
   return !(r.error || r.status !== 0);
 }
 
-const capabilities = { resume: true, agents: false, models: true, sessionStore: true, singleWriterLock: false, incrementalOutput: true };
+const capabilities = { resume: true, agents: false, models: true, planMode: true, sessionStore: true, singleWriterLock: false, incrementalOutput: true };
 
 const adapter = {
   id: 'cline',

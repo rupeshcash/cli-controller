@@ -107,7 +107,28 @@ function livePeek(threadKey) {
 const aborted = new Set();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function helpText() {
+function fmtTok(n) { n = Number(n) || 0; return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+function usageLine(u, model) {
+  if (!u) return 'no usage reported';
+  const bits = [`${fmtTok(u.input)} in`, `${fmtTok(u.output)} out`];
+  if (u.cost != null) bits.push(`$${Number(u.cost).toFixed(u.cost < 0.01 ? 4 : 2)}`);
+  if (model) bits.push(String(model));
+  return bits.join(' · ');
+}
+function usageFooter(u, model) { return `_⌁ ${usageLine(u, model)}_`; }
+
+// Brain-aware control list: same verbs everywhere, but only show what THIS brain supports.
+function brainControls(brainId) {
+  const b = getBrain(brainId); const c = b.capabilities || {};
+  const rows = ['`!model <name>` — choose the model'];
+  if (brainId === 'cline') rows.push('`!provider <name>` — choose the provider');
+  if (c.agents) rows.push('`!agent <name>` — choose the agent');
+  if (c.planMode) rows.push('`!plan` / `!act` — plan-first vs act-directly');
+  rows.push('`!usage` — tokens & cost of the last turn');
+  return `━━ *This session — brain \`${b.displayName || brainId}\`* ━━\n${rows.map((r) => '• ' + r).join('\n')}`;
+}
+
+function helpText(brainId) {
   const aliasNames = Object.keys(DIR_ALIASES);
   const quickNames = Object.keys(QUICK_ALIASES);
   const ws = aliasNames.length ? aliasNames[0] : 'myrepo';
@@ -135,7 +156,7 @@ function helpText() {
     '• *Bare message* → goes to your *coding agent* (continues the session).',
     '• `!` + *anything* → talks to your *manager* (me), in plain language:',
     '   `!use cline` · `!switch to opus` · `!abort this` · `!start over` · `!be quiet`',
-    '• Fast manager commands (instant): `!abort` `!status` `!peek` `!end` `!clear` `!verbose` `!model <n>` `!provider <n>` `!agent <n>`',
+    '• Fast commands (instant): `!abort` `!status` `!peek` `!end` `!clear` `!verbose` `!model <n>` `!provider <n>` `!agent <n>` `!plan`/`!act` `!usage`',
     '',
     '━━ *Find & resume any session* ━━',
     '• `!recent [n]` — recent sessions (terminal *and* Slack)  ·  `!teleport <id>` — pull one into a thread',
@@ -145,6 +166,7 @@ function helpText() {
     '',
     '_Status reactions:_ :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
   );
+  if (brainId) lines.push('', brainControls(brainId));
   return lines.filter((l) => l !== null).join('\n');
 }
 
@@ -247,7 +269,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   const onData = (c) => { prog.buf += c; if (prog.buf.length > 24000) prog.buf = prog.buf.slice(-24000); };
 
   let res = await brain.runTurn({
-    cwd: st.cwd, sessionId: st.sessionId, agent: st.agent, model: st.model, provider: st.provider,
+    cwd: st.cwd, sessionId: st.sessionId, agent: st.agent, model: st.model, provider: st.provider, plan: st.mode === 'plan',
     trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
   });
   running.delete(threadKey);
@@ -266,7 +288,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
     await say({ thread_ts, text: '↻ Couldn’t resume the previous session — starting a fresh one for this thread.' });
     const before2 = new Set((await brain.listSessions(st.cwd)).map((s) => s.sessionId));
     res = await brain.runTurn({
-      cwd: st.cwd, sessionId: null, agent: st.agent, model: st.model, provider: st.provider,
+      cwd: st.cwd, sessionId: null, agent: st.agent, model: st.model, provider: st.provider, plan: st.mode === 'plan',
       trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
     });
     running.delete(threadKey);
@@ -306,6 +328,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
     return sayThread(say, thread_ts, `⚠️ ${res.error || `${brain.displayName || brain.id || 'CLI'} exited with code ${res.code}.`}${hint}`);
   }
   await sendOutput({ client, say, channel, thread_ts, text: res.output, verbose: st.verbose });
+  if (res.usage) { store.set(threadKey, { lastUsage: res.usage, lastModel: res.model }); await sayThread(say, thread_ts, usageFooter(res.usage, res.model)); }
   if (!res.ok && res.error) await sayThread(say, thread_ts, `_error:_\n${res.error}`);
 }
 
@@ -472,7 +495,7 @@ async function handleMessage({ message, say, client }) {
   const lower = text.toLowerCase();
 
   // Global commands
-  if (lower === '!help') return say({ thread_ts: rootTs, text: helpText() });
+  if (lower === '!help') return say({ thread_ts: rootTs, text: helpText(store.has(threadKey) ? (store.get(threadKey).brain || DEFAULT_BRAIN) : null) });
   if (lower === '!agents') {
     const st = store.has(threadKey) ? store.get(threadKey) : { cwd: DEFAULT_CWD, brain: DEFAULT_BRAIN };
     const brain = getBrain(st.brain);
@@ -604,6 +627,24 @@ async function handleMessage({ message, say, client }) {
           const on = !arg ? !cur : /^(on|true|yes|1)$/i.test(arg);
           store.set(threadKey, { verbose: on });
           return say({ thread_ts: rootTs, text: on ? '🗣️ Verbose ON — full tool trace shown for this session.' : '🤫 Verbose OFF — answers only (default).' });
+        }
+        case 'plan':
+        case 'act': {
+          const cur = store.get(threadKey) || {};
+          const b = getBrain(cur.brain || DEFAULT_BRAIN);
+          if (!(b.capabilities && b.capabilities.planMode)) {
+            return say({ thread_ts: rootTs, text: `Plan/act mode isn't available for \`${b.displayName || cur.brain || DEFAULT_BRAIN}\`.` });
+          }
+          const mode = cmd.toLowerCase();
+          store.set(threadKey, { mode });
+          return say({ thread_ts: rootTs, text: mode === 'plan'
+            ? '🗺️ *Plan mode* ON — your next messages plan before acting. `!act` to switch back.'
+            : '⚡ *Act mode* ON — your next messages act directly (default).' });
+        }
+        case 'usage': {
+          const cur = store.get(threadKey) || {};
+          if (!cur.lastUsage) return say({ thread_ts: rootTs, text: 'No usage recorded yet — run a turn first. (Some brains don’t report usage.)' });
+          return say({ thread_ts: rootTs, text: `*Last turn* · ${usageLine(cur.lastUsage, cur.lastModel)}` });
         }
         default:
           // Not a fast command → the MANAGER interprets it as natural-language admin.
