@@ -2,20 +2,20 @@
 // bin/cli-controller.js — the front door. Cross-platform (no bash): runs the
 // setup wizard, manages the Slack bridge + web panel as Node services, and doctor.
 const path = require('path');
-const fs = require('fs');
 const { spawnSync } = require('child_process');
 const lc = require('../lib/lifecycle');
 const { isConfigured } = require('../lib/config');
+const { caEnv } = require('../lib/ca');
 
 const ROOT = path.resolve(__dirname, '..');
-const caFile = path.join(ROOT, 'slack-bridge', 'macos-ca.pem');
+const BRIDGE_DIR = path.join(ROOT, 'slack-bridge');
 
 const bridge = {
-  name: 'bridge', cwd: path.join(ROOT, 'slack-bridge'),
-  args: [path.join(ROOT, 'slack-bridge', 'src', 'index.js')],
-  pidFile: path.join(ROOT, 'slack-bridge', 'bridge.pid'),
-  logFile: path.join(ROOT, 'slack-bridge', 'bridge.log'),
-  env: fs.existsSync(caFile) ? { NODE_EXTRA_CA_CERTS: caFile } : {}, // folds run.sh's corporate-CA fix into Node
+  name: 'bridge', cwd: BRIDGE_DIR,
+  args: [path.join(BRIDGE_DIR, 'src', 'index.js')],
+  pidFile: path.join(BRIDGE_DIR, 'bridge.pid'),
+  logFile: path.join(BRIDGE_DIR, 'bridge.log'),
+  env: {}, // corporate-CA trust is provisioned in main() before the bridge starts
 };
 const panel = {
   name: 'panel', cwd: path.join(ROOT, 'web-ui'),
@@ -33,6 +33,7 @@ function svcStatus() {
 
 async function main() {
   const [cmd, sub] = process.argv.slice(2);
+  bridge.env = caEnv(BRIDGE_DIR); // best-effort OS/corporate CA so Socket Mode TLS works on fresh installs
 
   // per-service control: `cli-controller bridge start`, `panel restart`, …
   if (SVCS[cmd]) {

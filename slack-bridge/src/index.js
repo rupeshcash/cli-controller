@@ -10,7 +10,7 @@ require('dotenv').config();
 const os = require('os');
 const path = require('path');
 const { App } = require('@slack/bolt');
-const { runKiro, listSessions, listAgents, recentSessions, getSessionInfo, sessionLock, listModels } = require('./kiro');
+const { runKiro, listSessions, listAgents, recentSessions, getSessionInfo, sessionLock, forceUnlock, listModels } = require('./kiro');
 const { getBrain, listBrains, hasBrain, DEFAULT_BRAIN } = require('../../core/brain');
 const { memory } = require('../../core/memory');
 const { route, routeAdmin } = require('./broker');
@@ -44,7 +44,7 @@ const DIR_ALIASES = (process.env.KIRO_DIR_ALIASES || '')
     return acc;
   }, {});
 
-const { expandHome, resolveDir: _resolveDir, parseNew: _parseNew } = require('./parse');
+const { expandHome, resolveDir: _resolveDir, parseNew: _parseNew, parseTeleport } = require('./parse');
 function resolveDir(v) { return _resolveDir(DIR_ALIASES, v); }
 
 // Natural-language routing broker (plain messages → decide dir/agent/model).
@@ -212,6 +212,15 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   }
   const st = store.get(threadKey);
   const isFresh = !st.sessionId;
+  // Don't silently run a context-less turn against a session open in another LIVE process —
+  // Kiro can't attach, so the reply would ignore this session's history. Tell the user to take over.
+  if (!isFresh) {
+    const b0 = getBrain(st.brain);
+    const chk = b0.prepareResume ? await b0.prepareResume(st.sessionId) : { action: 'ok' };
+    if (chk.action === 'blocked') {
+      return say({ thread_ts, text: `:warning: This session is open in another process (pid ${chk.pid}), so I can't continue it here — you'd get replies without this session's context.\n• Take it over: \`!teleport ${st.sessionId} force\` (terminates that process), then resend your message.\n• Or close it there first.` });
+    }
+  }
   console.log(`[turn] ${threadKey} fresh=${isFresh} dir=${st.cwd} agent=${st.agent || 'default'} promptLen=${prompt.length}`);
 
   // Session header card — shown once per session (not repeated on the first prompt).
@@ -473,10 +482,16 @@ async function handleMessage({ message, say, client }) {
     return say({ thread_ts: rootTs, text: `*Recent Kiro sessions* (${items.length}):\n\n${body}\n\n_Continue any of them here with_ \`!teleport <sessionId>\`  ·  :lock: = currently open elsewhere` });
   }
   if (lower.startsWith('!teleport')) {
-    const id = (text.split(/\s+/)[1] || '').trim();
-    if (!id) return say({ thread_ts: rootTs, text: 'Usage: `!teleport <sessionId>` — pull any Kiro session into a Slack thread. See `!recent`.' });
+    const { id, force } = parseTeleport(text);
+    if (!id) return say({ thread_ts: rootTs, text: 'Usage: `!teleport <sessionId> [force]` — pull a Kiro session into this thread. Add `force` to take over one that is open elsewhere. See `!recent`.' });
     const info = getSessionInfo(id);
-    const lockPid = sessionLock(id);
+    let lockPid = sessionLock(id);
+    let takeoverNote = '';
+    if (lockPid && force) {
+      const r = forceUnlock(id);
+      takeoverNote = r.killed ? `\n\n:skull_and_crossbones: Terminated the process holding this session (pid ${r.killed}) — taken over here.` : '';
+      lockPid = null;
+    }
     store.set(threadKey, {
       cwd: (info && info.cwd) || DEFAULT_CWD,
       agent: (info && info.agent) || DEFAULT_AGENT,
@@ -489,9 +504,9 @@ async function handleMessage({ message, say, client }) {
       ? `${info.title ? `*${info.title.slice(0, 70)}*\n` : ''}dir \`${path.basename(info.cwd || '~')}\` · agent \`${info.agent || 'main'}\``
       : '_(session file not found — using default dir; resume may start fresh)_';
     const lockWarn = lockPid
-      ? `\n\n:warning: *This session is currently open in another process* (pid ${lockPid}) — likely a terminal/TUI. Continuing here at the same time will conflict and give stale replies. *Close it there first.*`
+      ? `\n\n:warning: *This session is open in another process* (pid ${lockPid}) — likely a terminal/TUI. Continuing here at the same time gives stale, conflicting replies.\n   • To take over anyway, send \`!teleport ${id} force\` — that *terminates that process* (you'll lose any unsaved work there).`
       : '';
-    return say({ thread_ts: rootTs, text: `🛸 *Teleported* \`${id.slice(0, 12)}…\` into this thread.\n${meta}\nReply here to continue this session.${lockWarn}` });
+    return say({ thread_ts: rootTs, text: `🛸 *Teleported* \`${id.slice(0, 12)}…\` into this thread.\n${meta}\nReply here to continue this session.${takeoverNote}${lockWarn}` });
   }
 
   // ── Quick aliases (e.g. !25-opus) → start a preset session ──

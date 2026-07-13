@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const kiroPty = require('./kiro-pty');
 
 const SESSIONS_DIR = path.join(os.homedir(), '.kiro', 'sessions', 'cli');
 const BIN = () => process.env.KIRO_BIN || 'kiro-cli';
@@ -27,10 +28,13 @@ function buildArgs({ sessionId, agent, model, trustTools }) {
 // Run one headless turn. Resolves { ok, output, error, code }. Never rejects.
 function runKiro({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs = 300000, onSpawn, onData }) {
   return new Promise((resolve) => {
+    if (sessionId) clearStaleLock(sessionId); // heal a dead-owner lock so resume attaches, not forks
     let child;
     try {
+      // detached only on POSIX (enables !abort group-kill); on Windows it strips kiro-cli's console handles → "handle is invalid (os error 6)".
+      const posix = process.platform !== 'win32';
       child = spawn(BIN(), buildArgs({ sessionId, agent, model, trustTools }), {
-        cwd: cwd || process.cwd(), env: process.env, detached: true,
+        cwd: cwd || process.cwd(), env: process.env, detached: posix, windowsHide: true,
       });
     } catch (e) {
       return resolve({ ok: false, output: '', error: `Failed to start ${BIN()}: ${e.message}`, code: -1 });
@@ -127,6 +131,27 @@ function sessionLock(id) {
   } catch { return null; }
 }
 
+// Force-release a locked session: terminate the holding process and clear the stale .lock. Best-effort, never throws.
+function forceUnlock(id) {
+  const pid = sessionLock(id);
+  if (pid) {
+    try { process.kill(pid, 'SIGTERM'); } catch {}
+    setTimeout(() => { try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); } catch {} }, 2000);
+  }
+  try { fs.unlinkSync(path.join(SESSIONS_DIR, `${id}.lock`)); } catch {}
+  return { killed: pid || null };
+}
+
+// Remove a leftover .lock whose owner process is dead, so resume attaches to the
+// real session instead of forking a fresh (context-less) one. Only clears DEAD locks.
+function clearStaleLock(id) {
+  if (!id) return;
+  try {
+    const lf = path.join(SESSIONS_DIR, `${id}.lock`);
+    if (fs.existsSync(lf) && sessionLock(id) === null) fs.unlinkSync(lf);
+  } catch {}
+}
+
 function listModels() {
   return new Promise((resolve) => {
     let child;
@@ -151,7 +176,13 @@ const adapter = {
   id: 'kiro',
   displayName: 'Kiro',
   capabilities,
-  runTurn: (input) => runKiro(input),
+  runTurn: (input) => {
+    // Resume via interactive PTY when available + enabled (rehydrates TUI/subagent sessions that
+    // headless --resume-id can't — Kiro#9066); runKiroPty returns a clean answer via Kiro's own
+    // /transcript export. Fresh turns and the default path stay headless.
+    if (input.sessionId && kiroPty.ptySupported() && process.env.KIRO_PTY_RESUME === '1') return kiroPty.runKiroPty(input);
+    return runKiro(input);
+  },
   // Normalized session listing → [{ sessionId, ... }]
   listSessions: (cwd) => listSessions(cwd),
   listAgents: (cwd) => listAgents(cwd),
@@ -165,12 +196,13 @@ const adapter = {
     return { action: 'blocked', pid, reason: `This session is open in another live process (pid ${pid}).`, options: ['take-over', 'read-only', 'cancel'] };
   },
   buildResumeCommand: (s) => `cd ${s.cwd || '~'} && kiro-cli chat${s.agent ? ` --agent ${s.agent}` : ''} --resume-id ${s.id}`,
+  forceUnlock: (id) => forceUnlock(id),
   doctor: async () => ({ ok: isInstalled(), msg: isInstalled() ? 'kiro-cli found' : "kiro-cli not found on PATH" }),
 };
 
 module.exports = {
   // low-level (kept for import compatibility)
-  runKiro, listSessions, getLatestSessionId, listAgents, recentSessions, getSessionInfo, sessionLock, listModels,
+  runKiro, listSessions, getLatestSessionId, listAgents, recentSessions, getSessionInfo, sessionLock, forceUnlock, clearStaleLock, listModels,
   // brain
   adapter, capabilities,
 };

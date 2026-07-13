@@ -9,5 +9,6 @@ module.exports = {
   recentSessions: k.recentSessions,
   getSessionInfo: k.getSessionInfo,
   sessionLock: k.sessionLock,
+  forceUnlock: k.forceUnlock,
   listModels: k.listModels,
 };
