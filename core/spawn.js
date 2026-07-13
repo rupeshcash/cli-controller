@@ -35,10 +35,11 @@ function normalizeSpawn(command, args = []) {
     return { command: process.execPath, args: [command, ...args] };
   }
   // Windows: route through cmd.exe, which resolves .exe/.cmd/.bat shims via PATHEXT.
-  // We pass the command NAME, never a PATH-derived absolute path, so spawn is never
-  // handed an environment-controlled absolute path (CodeQL js/shell-command-injection-from-environment).
+  // Use ComSpec (the full path to cmd.exe) so spawn can actually find it, and pass the
+  // command NAME (never a PATH-derived absolute path) so we don't hand spawn an
+  // uncontrolled absolute path (CodeQL js/shell-command-injection-from-environment).
   if (process.platform === 'win32') {
-    return { command: 'cmd.exe', args: ['/d', '/s', '/c', command, ...args] };
+    return { command: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', command, ...args] };
   }
   // POSIX: spawn (shell:false) resolves a bare name via PATH itself; an explicit path is used as-is.
   return { command, args };
