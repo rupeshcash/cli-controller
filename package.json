@@ -1,6 +1,6 @@
 {
   "name": "cli-controller-lib",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Drive AI coding CLIs (Kiro, Cline) from Slack and a local web cockpit. Local-first, single-user, no server.",
   "bin": {
     "cli-controller": "bin/cli-controller.js"

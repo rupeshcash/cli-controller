@@ -17,9 +17,10 @@ All notable changes to this project. Format loosely follows Keep a Changelog; ve
 ### Security
 - Safe defaults: self-only allow-list, opt-in tool trust, `127.0.0.1`-only cockpit, secrets in a 0600 `.env`, stdin-fed prompts, no-shell spawns. See `SECURITY.md`.
 
-## [0.1.1]
+## [0.2.0]
 
 ### Added
+- **Context-carrying resume for terminal/subagent sessions (opt-in).** Kiro's headless `--resume-id` doesn't rehydrate sessions created in the interactive terminal (Kiro#9066), so continuing/teleporting them lost context. With `KIRO_PTY_RESUME=1` (+ optional `node-pty`), the bridge resumes such sessions in a real PTY so context is restored natively, and reads the reply from Kiro's own `/transcript` export for clean formatting. Falls back to headless when disabled or when `node-pty` isn't available. `node-pty` is an **optional** dependency — installs default to clean headless behavior.
 - **`!teleport <id> force`** — take over a session that's open in another process (terminal/TUI). Force terminates the lock-holding process and clears the stale lock, so the session can be resumed in Slack. Without `force`, teleport warns and tells you the exact take-over command instead of just "close it there first".
 
 ### Fixed
