@@ -2,6 +2,7 @@
 // On Windows, npm package bins are often .cmd shims or JS files without a native
 // executable bit. Normalize those forms so adapters can use spawn without shell.
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
@@ -45,14 +46,25 @@ function normalizeSpawn(command, args = []) {
   return { command, args };
 }
 
+// A cwd that doesn't exist makes Windows spawn fail with a misleading "spawn <cmd> ENOENT".
+// Fall back to home so a stale/relocated session dir degrades gracefully instead of hard-failing.
+function safeOptions(options = {}) {
+  const opts = { ...options, shell: false };
+  if (opts.cwd && !fs.existsSync(opts.cwd)) {
+    console.warn(`[spawn] cwd does not exist: ${opts.cwd} — falling back to ${os.homedir()}`);
+    opts.cwd = os.homedir();
+  }
+  return opts;
+}
+
 function spawnCli(command, args = [], options = {}) {
   const n = normalizeSpawn(command, args);
-  return spawn(n.command, n.args, { ...options, shell: false });
+  return spawn(n.command, n.args, safeOptions(options));
 }
 
 function spawnCliSync(command, args = [], options = {}) {
   const n = normalizeSpawn(command, args);
-  return spawnSync(n.command, n.args, { ...options, shell: false });
+  return spawnSync(n.command, n.args, safeOptions(options));
 }
 
 module.exports = { candidatePaths, resolveCommand, normalizeSpawn, spawnCli, spawnCliSync };
