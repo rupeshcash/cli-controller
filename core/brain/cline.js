@@ -54,7 +54,8 @@ function parseJsonl(stdout) {
   };
 }
 
-// Run one turn. Prompt via positional arg (spawn args array → no shell injection).
+// Run one turn. Prompt via positional arg — verified: Cline reads the prompt from argv;
+// its "piped stdin" mode is only for the `hook` subcommand, not the prompt.
 function runCline({ cwd, sessionId, model, provider, trustTools, prompt, timeoutMs = 0, onSpawn, onData }) {
   return new Promise((resolve) => {
     const args = buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs });
