@@ -129,6 +129,17 @@ function sessionLock(id) {
   } catch { return null; }
 }
 
+// Force-release a locked session: terminate the holding process and clear the stale .lock. Best-effort, never throws.
+function forceUnlock(id) {
+  const pid = sessionLock(id);
+  if (pid) {
+    try { process.kill(pid, 'SIGTERM'); } catch {}
+    setTimeout(() => { try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); } catch {} }, 2000);
+  }
+  try { fs.unlinkSync(path.join(SESSIONS_DIR, `${id}.lock`)); } catch {}
+  return { killed: pid || null };
+}
+
 function listModels() {
   return new Promise((resolve) => {
     let child;
@@ -167,12 +178,13 @@ const adapter = {
     return { action: 'blocked', pid, reason: `This session is open in another live process (pid ${pid}).`, options: ['take-over', 'read-only', 'cancel'] };
   },
   buildResumeCommand: (s) => `cd ${s.cwd || '~'} && kiro-cli chat${s.agent ? ` --agent ${s.agent}` : ''} --resume-id ${s.id}`,
+  forceUnlock: (id) => forceUnlock(id),
   doctor: async () => ({ ok: isInstalled(), msg: isInstalled() ? 'kiro-cli found' : "kiro-cli not found on PATH" }),
 };
 
 module.exports = {
   // low-level (kept for import compatibility)
-  runKiro, listSessions, getLatestSessionId, listAgents, recentSessions, getSessionInfo, sessionLock, listModels,
+  runKiro, listSessions, getLatestSessionId, listAgents, recentSessions, getSessionInfo, sessionLock, forceUnlock, listModels,
   // brain
   adapter, capabilities,
 };

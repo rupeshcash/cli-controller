@@ -19,6 +19,9 @@ All notable changes to this project. Format loosely follows Keep a Changelog; ve
 
 ## [0.1.1]
 
+### Added
+- **`!teleport <id> force`** — take over a session that's open in another process (terminal/TUI). Force terminates the lock-holding process and clears the stale lock, so the session can be resumed in Slack. Without `force`, teleport warns and tells you the exact take-over command instead of just "close it there first".
+
 ### Fixed
 - **Windows:** Kiro turns from the bridge failed with `The handle is invalid. (os error 6)` — the child was spawned `detached`, which strips console/std handles on Windows, so `kiro-cli` died before a session was created. `detached` is now POSIX-only (still powers `!abort` group-kill on macOS/Linux); Windows spawns with `windowsHide` instead. No behavior change on macOS/Linux.
 - **Corporate TLS proxies:** a fresh `npm i -g` had no `macos-ca.pem`, so the bridge died on the Slack Socket Mode handshake with `unable to get local issuer certificate`. The `cli-controller` binary now provisions OS/corporate CA trust on start (macOS: exports the system keychains to a PEM; all platforms: `--use-system-ca` when the Node version supports it) — best-effort and never blocks startup.

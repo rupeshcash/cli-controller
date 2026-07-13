@@ -44,4 +44,10 @@ function parseNew(text, aliases = {}) {
   return { patch, prompt: rest.trim() };
 }
 
-module.exports = { expandHome, resolveDir, parseNew };
+// Parse "!teleport <sessionId> [force]" → { id, force }. `force` requests lock take-over.
+function parseTeleport(text) {
+  const parts = (text || '').trim().split(/\s+/);
+  return { id: (parts[1] || '').trim(), force: /^(force|--force|-f)$/i.test((parts[2] || '').trim()) };
+}
+
+module.exports = { expandHome, resolveDir, parseNew, parseTeleport };
