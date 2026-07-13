@@ -27,6 +27,7 @@ function buildArgs({ sessionId, agent, model, trustTools }) {
 // Run one headless turn. Resolves { ok, output, error, code }. Never rejects.
 function runKiro({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs = 300000, onSpawn, onData }) {
   return new Promise((resolve) => {
+    if (sessionId) clearStaleLock(sessionId); // heal a dead-owner lock so resume attaches, not forks
     let child;
     try {
       // detached only on POSIX (enables !abort group-kill); on Windows it strips kiro-cli's console handles → "handle is invalid (os error 6)".
@@ -140,6 +141,16 @@ function forceUnlock(id) {
   return { killed: pid || null };
 }
 
+// Remove a leftover .lock whose owner process is dead, so resume attaches to the
+// real session instead of forking a fresh (context-less) one. Only clears DEAD locks.
+function clearStaleLock(id) {
+  if (!id) return;
+  try {
+    const lf = path.join(SESSIONS_DIR, `${id}.lock`);
+    if (fs.existsSync(lf) && sessionLock(id) === null) fs.unlinkSync(lf);
+  } catch {}
+}
+
 function listModels() {
   return new Promise((resolve) => {
     let child;
@@ -184,7 +195,7 @@ const adapter = {
 
 module.exports = {
   // low-level (kept for import compatibility)
-  runKiro, listSessions, getLatestSessionId, listAgents, recentSessions, getSessionInfo, sessionLock, forceUnlock, listModels,
+  runKiro, listSessions, getLatestSessionId, listAgents, recentSessions, getSessionInfo, sessionLock, forceUnlock, clearStaleLock, listModels,
   // brain
   adapter, capabilities,
 };

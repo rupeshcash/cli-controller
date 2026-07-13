@@ -212,6 +212,15 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   }
   const st = store.get(threadKey);
   const isFresh = !st.sessionId;
+  // Don't silently run a context-less turn against a session open in another LIVE process —
+  // Kiro can't attach, so the reply would ignore this session's history. Tell the user to take over.
+  if (!isFresh) {
+    const b0 = getBrain(st.brain);
+    const chk = b0.prepareResume ? await b0.prepareResume(st.sessionId) : { action: 'ok' };
+    if (chk.action === 'blocked') {
+      return say({ thread_ts, text: `:warning: This session is open in another process (pid ${chk.pid}), so I can't continue it here — you'd get replies without this session's context.\n• Take it over: \`!teleport ${st.sessionId} force\` (terminates that process), then resend your message.\n• Or close it there first.` });
+    }
+  }
   console.log(`[turn] ${threadKey} fresh=${isFresh} dir=${st.cwd} agent=${st.agent || 'default'} promptLen=${prompt.length}`);
 
   // Session header card — shown once per session (not repeated on the first prompt).
