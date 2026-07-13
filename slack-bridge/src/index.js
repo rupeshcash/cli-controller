@@ -48,6 +48,7 @@ function resolveDir(v) { return _resolveDir(DIR_ALIASES, v); }
 
 // Natural-language routing broker (plain messages → decide dir/agent/model).
 const BROKER_ON = process.env.KIRO_BROKER !== '0' && hasBrain('kiro'); // NL router runs on Kiro but can route to any brain (incl. Cline)
+console.log(`[boot] brains=${listBrains().join(',')} · default=${DEFAULT_BRAIN} · env.CLI_CONTROLLER_DEFAULT_BRAIN=${process.env.CLI_CONTROLLER_DEFAULT_BRAIN || '(unset)'} · broker=${BROKER_ON ? 'on' : 'off'}`);
 const BROKER_MODEL = process.env.KIRO_BROKER_MODEL || 'claude-haiku-4.5';
 let AGENTS_RAW = '';
 let MODELS_CACHE = [];
