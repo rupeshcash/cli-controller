@@ -47,7 +47,7 @@ const { expandHome, resolveDir: _resolveDir, parseNew: _parseNew } = require('./
 function resolveDir(v) { return _resolveDir(DIR_ALIASES, v); }
 
 // Natural-language routing broker (plain messages → decide dir/agent/model).
-const BROKER_ON = process.env.KIRO_BROKER !== '0' && DEFAULT_BRAIN === 'kiro';
+const BROKER_ON = process.env.KIRO_BROKER !== '0' && hasBrain('kiro'); // NL router runs on Kiro but can route to any brain (incl. Cline)
 const BROKER_MODEL = process.env.KIRO_BROKER_MODEL || 'claude-haiku-4.5';
 let AGENTS_RAW = '';
 let MODELS_CACHE = [];
@@ -203,6 +203,14 @@ async function captureNewSession(brain, cwd, beforeIds) {
   // Only return a genuinely-new session. NEVER fall back to an existing one —
   // that would silently latch the thread onto an unrelated conversation.
   return (fresh && fresh.sessionId) || null;
+}
+
+// Recent sessions across ALL brains (Kiro + Cline + …), newest first, tagged with brain.
+async function allRecent(n) {
+  const lists = await Promise.all(listBrains().map(async (b) => {
+    try { return (await getBrain(b).recentSessions(n)).map((s) => ({ ...s, brain: b })); } catch { return []; }
+  }));
+  return lists.flat().sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))).slice(0, n);
 }
 
 async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, client }) {
@@ -380,10 +388,10 @@ async function applyAdmin(text, { threadKey, rootTs, say }) {
     }
     case 'recent': {
       const n = Math.min(parseInt(d.value, 10) || 8, 20);
-      const items = await getBrain(DEFAULT_BRAIN).recentSessions(n);
+      const items = await allRecent(n);
       if (!items.length) return say({ thread_ts: rootTs, text: 'No sessions found.' });
-      const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title}\n   \`${s.id}\``).join('\n');
-      return say({ thread_ts: rootTs, text: `*Recent sessions:*\n${body}\n\n_Resume:_ \`!teleport <id>\`` });
+      const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title} · \`${s.brain}\`\n   \`${s.id}\``).join('\n');
+      return say({ thread_ts: rootTs, text: `*Recent sessions* (all brains):\n${body}\n\n_Resume:_ \`!teleport <id> <brain>\`` });
     }
     case 'teleport':
       return say({ thread_ts: rootTs, text: d.value ? `To resume that session, send \`!teleport ${d.value}\` as a *top-level* message.` : 'Which session id? See `!recent`.' });
@@ -480,10 +488,10 @@ async function handleMessage({ message, say, client }) {
   }
   if (lower.startsWith('!recent')) {
     const n = Math.min(parseInt(text.split(/\s+/)[1], 10) || 8, 20);
-    const items = await getBrain(DEFAULT_BRAIN).recentSessions(n);
+    const items = await allRecent(n);
     if (!items.length) return say({ thread_ts: rootTs, text: 'No sessions found.' });
-    const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title}\n   \`${s.id}\`\n   ${s.agent || 'main'} · \`${s.cwd ? path.basename(s.cwd) : '~'}\` · ${rel(s.updatedAt)}`).join('\n\n');
-    return say({ thread_ts: rootTs, text: `*Recent ${getBrain(DEFAULT_BRAIN).displayName || DEFAULT_BRAIN} sessions* (${items.length}):\n\n${body}\n\n_Continue any of them here with_ \`!teleport <sessionId>\`  ·  :lock: = currently open elsewhere` });
+    const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title}\n   \`${s.id}\` · brain \`${s.brain}\`\n   ${s.agent || '—'} · \`${s.cwd ? path.basename(s.cwd) : '~'}\` · ${rel(s.updatedAt)}`).join('\n\n');
+    return say({ thread_ts: rootTs, text: `*Recent sessions* (${items.length}, all brains):\n\n${body}\n\n_Continue any here with_ \`!teleport <sessionId> <brain>\`  ·  :lock: = open elsewhere` });
   }
   if (lower.startsWith('!teleport')) {
     const parts = text.split(/\s+/).slice(1).filter(Boolean);
