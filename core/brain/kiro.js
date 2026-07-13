@@ -178,7 +178,8 @@ const adapter = {
   capabilities,
   runTurn: (input) => {
     // Resume via interactive PTY when available + enabled (rehydrates TUI/subagent sessions that
-    // headless --resume-id can't — Kiro#9066). Fresh turns and the default path stay headless.
+    // headless --resume-id can't — Kiro#9066); runKiroPty returns a clean answer via Kiro's own
+    // /transcript export. Fresh turns and the default path stay headless.
     if (input.sessionId && kiroPty.ptySupported() && process.env.KIRO_PTY_RESUME === '1') return kiroPty.runKiroPty(input);
     return runKiro(input);
   },
