@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const kiroPty = require('./kiro-pty');
 
 const SESSIONS_DIR = path.join(os.homedir(), '.kiro', 'sessions', 'cli');
 const BIN = () => process.env.KIRO_BIN || 'kiro-cli';
@@ -175,7 +176,12 @@ const adapter = {
   id: 'kiro',
   displayName: 'Kiro',
   capabilities,
-  runTurn: (input) => runKiro(input),
+  runTurn: (input) => {
+    // Resume via interactive PTY when available + enabled (rehydrates TUI/subagent sessions that
+    // headless --resume-id can't — Kiro#9066). Fresh turns and the default path stay headless.
+    if (input.sessionId && kiroPty.ptySupported() && process.env.KIRO_PTY_RESUME === '1') return kiroPty.runKiroPty(input);
+    return runKiro(input);
+  },
   // Normalized session listing → [{ sessionId, ... }]
   listSessions: (cwd) => listSessions(cwd),
   listAgents: (cwd) => listAgents(cwd),
