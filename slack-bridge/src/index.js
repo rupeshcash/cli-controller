@@ -16,6 +16,7 @@ const { route, routeAdmin } = require('./broker');
 const store = require('./sessions');
 const { chunk } = require('./chunk');
 const { stripToolTrace, toSlack } = require('./format');
+const attach = require('./attachments');
 
 function rel(d) { if (!d) return '—'; const s = Math.floor((Date.now() - new Date(d)) / 1000); if (s < 60) return s + 's ago'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago'; }
 
@@ -140,6 +141,7 @@ function helpText(brainId) {
     '• *Send any message* → starts a new session; I reply in a :thread: *thread*.',
     '• *Reply inside that thread* → continues the same session (full context).',
     '• Each new top-level message → a separate, *parallel* session.',
+    '• *Attach an image or text snippet* → forwarded to the agent (image-capable brains, e.g. Kiro, can see it).',
     `• Defaults: agent \`${DEFAULT_AGENT}\` · dir \`${DEFAULT_CWD}\` · verbose on.`,
     '',
     '━━ *Start a session* ━━',
@@ -474,7 +476,10 @@ async function resolvePending(st, text, { threadKey, rootTs, channel, say, clien
 }
 
 async function handleMessage({ message, say, client }) {
-  if (message.subtype || message.bot_id) return;         // ignore edits/joins/bots (incl. our own)
+  // Let file uploads through (subtype 'file_share' carries message.files[]); still ignore
+  // edits/joins/other subtypes and any bot messages (incl. our own).
+  if (message.bot_id) return;
+  if (message.subtype && message.subtype !== 'file_share') return;
   const chType = message.channel_type;
   const isDM = chType === 'im';
   const isChannel = chType === 'channel' || chType === 'group' || chType === 'mpim';
@@ -486,13 +491,32 @@ async function handleMessage({ message, say, client }) {
   // (to START a session) or a reply inside a thread it already owns (to CONTINUE).
   const mentioned = BOT_USER_ID ? text.includes(`<@${BOT_USER_ID}>`) : false;
   if (BOT_USER_ID) text = text.replace(new RegExp(`<@${BOT_USER_ID}>`, 'g'), '').trim();
-  if (!text) return;
+  if (!text && !attach.hasFiles(message)) return;
 
   const channel = message.channel;
   const isThreadReply = !!message.thread_ts && message.thread_ts !== message.ts;
   const rootTs = message.thread_ts || message.ts;
   const threadKey = `${channel}:${rootTs}`;
   if (isChannel && !mentioned && !(isThreadReply && store.has(threadKey))) return; // ignore unrelated channel chatter
+
+  // ── Attachments: images + text snippets → forwarded to the brain (and, as text, to the manager) ──
+  // Image forwarding is gated on the target brain's `images` capability (Kiro: yes, Cline: not yet).
+  // For a thread reply the brain is known; for a fresh top-level message it defaults to DEFAULT_BRAIN
+  // (the router may re-route, but images are only meaningful for image-capable brains — Kiro is default).
+  if (attach.hasFiles(message)) {
+    const targetBrain = (isThreadReply && store.has(threadKey)) ? (store.get(threadKey).brain || DEFAULT_BRAIN) : DEFAULT_BRAIN;
+    const canImages = (getBrain(targetBrain).capabilities || {}).images === true;
+    const dl = await attach.downloadFiles(message, process.env.SLACK_BOT_TOKEN);
+    const note = attach.describe(dl, { includeImages: canImages });
+    if (note) await say({ thread_ts: rootTs, text: note });
+    if (dl.images.length && !canImages) {
+      await say({ thread_ts: rootTs, text: `ℹ️ Brain \`${targetBrain}\` can’t view images yet — forwarding your text only. Switch with \`!use kiro\`.` });
+    }
+    const ctx = attach.buildContext(dl, { includeImages: canImages });
+    if (ctx) text = text ? `${text}\n\n${ctx}` : ctx;
+    if (!text) return; // nothing usable came through (e.g. all downloads failed)
+  }
+
   const lower = text.toLowerCase();
 
   // Global commands
@@ -692,6 +716,7 @@ const cfg = require('./config');
   const { errors } = cfg.report(checks);
   if (errors) { console.error(`\n✗ ${errors} config error(s) — cannot start. Fix the above and retry.`); process.exit(1); }
   await app.start();
+  attach.sweepOld(); // best-effort: drop attachment downloads older than 24h
   try { const a = await app.client.auth.test(); BOT_USER_ID = a.user_id; console.log('   Bot user:', a.user_id, '| channels: @mention to start, reply to continue'); } catch (e) { console.warn('   ⚠ auth.test failed — channel @mention detection disabled:', e.message); }
   console.log('⚡ CLI Controller Slack bridge running (Socket Mode) — thread = session.');
   console.log('   Default brain:', DEFAULT_BRAIN, '| available:', listBrains().join(', '));
