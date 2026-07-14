@@ -34,6 +34,28 @@ cli-controller panel  <cmd>            # web cockpit only (http://localhost:1234
 - **Web cockpit.** Browse/search/filter every session (terminal *and* Slack), start & continue sessions in the browser, control the bridge — on `localhost:1234`.
 - **Channels too.** `@mention` the bot to start in a channel; reply in-thread to continue. The allow-list still gates who can run code.
 
+## Cline support
+
+Install and configure the Cline CLI separately, then either make it the default brain or choose it per Slack session:
+
+```bash
+npm i -g cline
+cli-controller doctor
+```
+
+```env
+CLI_CONTROLLER_DEFAULT_BRAIN=cline
+CLINE_BIN=cline
+```
+
+Per-session from Slack:
+
+```text
+!new brain=cline dir=~/projects/myrepo provider=anthropic model=claude-sonnet-4 fix the failing tests
+```
+
+Inside a thread, `!provider <name>` and `!model <name>` apply to the next turn.
+
 ## Security
 
 This is **remote code execution on your own machine, by design.** Safe defaults are enforced: the wizard sets `SLACK_ALLOWED_USER_IDS` to just you (never `*` on shared workspaces), tool-trust is opt-in, and the web cockpit binds to `127.0.0.1`. `cli-controller doctor` warns on risky combinations. See [`SECURITY.md`](SECURITY.md).

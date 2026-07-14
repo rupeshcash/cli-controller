@@ -11,12 +11,12 @@ function resolveDir(aliases, v) {
   return expandHome((aliases && aliases[v]) || v);
 }
 
-// Parse a "!new [agent=..] [dir=..|alias] [model=..] [-v|-q] <prompt>" message.
+// Parse a "!new [brain=..] [agent=..] [dir=..|alias] [model=..] [provider=..] [-v|-q] <prompt>" message.
 // Returns { patch, prompt }. `aliases` maps dir-alias name -> path.
 function parseNew(text, aliases = {}) {
   let rest = text.slice(4).trim(); // after "!new"
   const patch = {};
-  const optRe = /^(agent|dir|cwd|model|brain|verbose)\s*=\s*(\S+)\s*/i;
+  const optRe = /^(agent|dir|cwd|model|provider|brain|tool|verbose)\s*=\s*(\S+)\s*/i;
   const flagVRe = /^(?:-v|--verbose)(?:\s+|$)/i;
   const flagQRe = /^(?:-q|--quiet)(?:\s+|$)/i;
   for (;;) {
@@ -26,7 +26,8 @@ function parseNew(text, aliases = {}) {
       if (k === 'agent') patch.agent = v;
       else if (k === 'dir' || k === 'cwd') patch.cwd = resolveDir(aliases, v);
       else if (k === 'model') patch.model = v;
-      else if (k === 'brain') patch.brain = v.toLowerCase();
+      else if (k === 'provider') patch.provider = v;
+      else if (k === 'brain' || k === 'tool') patch.brain = v.toLowerCase();
       else if (k === 'verbose') patch.verbose = /^(true|on|yes|1)$/i.test(v);
       rest = rest.slice(m[0].length);
       continue;

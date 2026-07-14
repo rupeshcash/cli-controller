@@ -9,7 +9,7 @@ const brains = {
 // Cline is wired in P2 (core/brain/cline.js).
 try { brains.cline = require('./cline').adapter; } catch { /* not present yet */ }
 
-const DEFAULT_BRAIN = process.env.KIRO_DEFAULT_BRAIN || 'kiro';
+const DEFAULT_BRAIN = process.env.CLI_CONTROLLER_DEFAULT_BRAIN || process.env.KIRO_DEFAULT_BRAIN || 'kiro';
 
 function getBrain(id) {
   return (id && brains[id]) || brains[DEFAULT_BRAIN] || brains.kiro;

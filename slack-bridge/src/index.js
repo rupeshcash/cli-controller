@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// src/index.js — Kiro Slack bridge (Socket Mode). Model: THREAD = SESSION.
+// src/index.js — CLI Controller Slack bridge (Socket Mode). Model: THREAD = SESSION.
 //
-//   • Send ANY message            → starts a new Kiro session; the bot replies in a thread.
+//   • Send ANY message            → starts a new AI CLI session; the bot replies in a thread.
 //   • Reply inside that thread     → continues the same session (no command).
 //   • Each top-level message       → an independent, parallel session (its own thread).
 //   • Default agent: `main` (configurable). Reactions show status: ⏳ → ✅ / ❌.
@@ -10,7 +10,6 @@ require('dotenv').config();
 const os = require('os');
 const path = require('path');
 const { App } = require('@slack/bolt');
-const { runKiro, listSessions, listAgents, recentSessions, getSessionInfo, sessionLock, forceUnlock, listModels } = require('./kiro');
 const { getBrain, listBrains, hasBrain, DEFAULT_BRAIN } = require('../../core/brain');
 const { memory } = require('../../core/memory');
 const { route, routeAdmin } = require('./broker');
@@ -44,11 +43,12 @@ const DIR_ALIASES = (process.env.KIRO_DIR_ALIASES || '')
     return acc;
   }, {});
 
-const { expandHome, resolveDir: _resolveDir, parseNew: _parseNew, parseTeleport } = require('./parse');
+const { expandHome, resolveDir: _resolveDir, parseNew: _parseNew } = require('./parse');
 function resolveDir(v) { return _resolveDir(DIR_ALIASES, v); }
 
 // Natural-language routing broker (plain messages → decide dir/agent/model).
-const BROKER_ON = process.env.KIRO_BROKER !== '0';
+const BROKER_ON = process.env.KIRO_BROKER !== '0' && hasBrain('kiro'); // NL router runs on Kiro but can route to any brain (incl. Cline)
+console.log(`[boot] brains=${listBrains().join(',')} · default=${DEFAULT_BRAIN} · env.CLI_CONTROLLER_DEFAULT_BRAIN=${process.env.CLI_CONTROLLER_DEFAULT_BRAIN || '(unset)'} · broker=${BROKER_ON ? 'on' : 'off'}`);
 const BROKER_MODEL = process.env.KIRO_BROKER_MODEL || 'claude-haiku-4.5';
 let AGENTS_RAW = '';
 let MODELS_CACHE = [];
@@ -100,20 +100,41 @@ function livePeek(threadKey) {
   const mins = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
   const tail = ansiStrip(p.buf).replace(/\n{3,}/g, '\n\n').trim().slice(-1600);
   if (tail) return `⏳ *Running ${mins}* — latest activity:\n\`\`\`\n${tail}\n\`\`\``;
-  // Kiro buffers output until the turn completes (not a TTY), so mid-run content
+  // Some CLIs buffer output until the turn completes (not a TTY), so mid-run content
   // usually isn't available yet — report liveness instead.
-  return `⏳ *Kiro is still working — ${mins} elapsed.*\nOutput arrives when the turn completes. Send \`!abort\` to cancel.`;
+  return `⏳ *CLI is still working — ${mins} elapsed.*\nOutput arrives when the turn completes. Send \`!abort\` to cancel.`;
 }
 // threadKeys whose current run was aborted — suppresses output from the dying process.
 const aborted = new Set();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function helpText() {
+function fmtTok(n) { n = Number(n) || 0; return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+function usageLine(u, model) {
+  if (!u) return 'no usage reported';
+  const bits = [`${fmtTok(u.input)} in`, `${fmtTok(u.output)} out`];
+  if (u.cost != null) bits.push(`$${Number(u.cost).toFixed(u.cost < 0.01 ? 4 : 2)}`);
+  if (model) bits.push(String(model));
+  return bits.join(' · ');
+}
+function usageFooter(u, model) { return `_⌁ ${usageLine(u, model)}_`; }
+
+// Brain-aware control list: same verbs everywhere, but only show what THIS brain supports.
+function brainControls(brainId) {
+  const b = getBrain(brainId); const c = b.capabilities || {};
+  const rows = ['`!model <name>` — choose the model'];
+  if (brainId === 'cline') rows.push('`!provider <name>` — choose the provider');
+  if (c.agents) rows.push('`!agent <name>` — choose the agent');
+  if (c.planMode) rows.push('`!plan` / `!act` — plan-first vs act-directly');
+  rows.push('`!usage` — tokens & cost of the last turn');
+  return `━━ *This session — brain \`${b.displayName || brainId}\`* ━━\n${rows.map((r) => '• ' + r).join('\n')}`;
+}
+
+function helpText(brainId) {
   const aliasNames = Object.keys(DIR_ALIASES);
   const quickNames = Object.keys(QUICK_ALIASES);
   const ws = aliasNames.length ? aliasNames[0] : 'myrepo';
   const lines = [
-    ':zap: *Kiro Bridge* — run Kiro from Slack. Each thread = one Kiro session.',
+    ':zap: *CLI Controller* — run AI coding CLIs from Slack. Each thread = one CLI session.',
     '',
     '━━ *How it works* ━━',
     '• *Send any message* → starts a new session; I reply in a :thread: *thread*.',
@@ -125,7 +146,7 @@ function helpText() {
     '• Just describe what you want, naturally — a router picks the repo/agent/model for you.',
     '   e.g. `in the 2025 api repo, use opus to fix the failing SLA test`',
     `• \`!new ${ws} run the unit tests\` — explicit workspace`,
-    '• `!new dir=~/path model=claude-opus-4.8 agent=main <task>` — full control',
+    '• `!new brain=cline dir=~/path provider=anthropic model=claude-opus-4.8 <task>` — full control',
     '• `!new -q <task>` — quiet (answer only, no tool trace)',
   ];
   if (quickNames.length) lines.push(`• Quick starts: ${quickNames.map((a) => '`!' + a + '`').join(' · ')}`);
@@ -136,7 +157,7 @@ function helpText() {
     '• *Bare message* → goes to your *coding agent* (continues the session).',
     '• `!` + *anything* → talks to your *manager* (me), in plain language:',
     '   `!use cline` · `!switch to opus` · `!abort this` · `!start over` · `!be quiet`',
-    '• Fast manager commands (instant): `!abort` `!status` `!peek` `!end` `!clear` `!verbose` `!model <n>` `!agent <n>`',
+    '• Fast commands (instant): `!abort` `!status` `!peek` `!end` `!clear` `!verbose` `!model <n>` `!provider <n>` `!agent <n>` `!plan`/`!act` `!usage`',
     '',
     '━━ *Find & resume any session* ━━',
     '• `!recent [n]` — recent sessions (terminal *and* Slack)  ·  `!teleport <id>` — pull one into a thread',
@@ -146,6 +167,7 @@ function helpText() {
     '',
     '_Status reactions:_ :hourglass_flowing_sand: working → :white_check_mark: done · :x: error',
   );
+  if (brainId) lines.push('', brainControls(brainId));
   return lines.filter((l) => l !== null).join('\n');
 }
 
@@ -165,8 +187,8 @@ async function sendOutput({ client, say, channel, thread_ts, text, verbose }) {
     await client.files.uploadV2({
       channel_id: channel,
       thread_ts,
-      filename: 'kiro-response.md',
-      title: 'Kiro output',
+      filename: 'cli-response.md',
+      title: 'CLI output',
       initial_comment: `📄 Long output (${finalText.length.toLocaleString()} chars) — attached:`,
       content: finalText, // raw Markdown in the downloadable file
     });
@@ -206,34 +228,41 @@ async function captureNewSession(brain, cwd, beforeIds) {
   return (fresh && fresh.sessionId) || null;
 }
 
+// Recent sessions across ALL brains (Kiro + Cline + …), newest first, tagged with brain.
+async function allRecent(n) {
+  const lists = await Promise.all(listBrains().map(async (b) => {
+    try { return (await getBrain(b).recentSessions(n)).map((s) => ({ ...s, brain: b })); } catch { return []; }
+  }));
+  return lists.flat().sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))).slice(0, n);
+}
+
 async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, client }) {
   if (running.has(threadKey)) {
     return say({ thread_ts, text: '⏳ Still working in this thread. Send `!abort` to cancel it first.' });
   }
   const st = store.get(threadKey);
   const isFresh = !st.sessionId;
-  // Don't silently run a context-less turn against a session open in another LIVE process —
-  // Kiro can't attach, so the reply would ignore this session's history. Tell the user to take over.
+  const brain = getBrain(st.brain);
+  // Don't silently run a context-less turn against a session open in another LIVE process
+  // (Kiro can't attach → reply would ignore this session's history). Tell the user to take over.
   if (!isFresh) {
-    const b0 = getBrain(st.brain);
-    const chk = b0.prepareResume ? await b0.prepareResume(st.sessionId) : { action: 'ok' };
+    const chk = brain.prepareResume ? await brain.prepareResume(st.sessionId) : { action: 'ok' };
     if (chk.action === 'blocked') {
       return say({ thread_ts, text: `:warning: This session is open in another process (pid ${chk.pid}), so I can't continue it here — you'd get replies without this session's context.\n• Take it over: \`!teleport ${st.sessionId} force\` (terminates that process), then resend your message.\n• Or close it there first.` });
     }
   }
-  console.log(`[turn] ${threadKey} fresh=${isFresh} dir=${st.cwd} agent=${st.agent || 'default'} promptLen=${prompt.length}`);
+  console.log(`[turn] ${threadKey} brain=${brain.id} fresh=${isFresh} dir=${st.cwd} agent=${st.agent || 'default'} promptLen=${prompt.length}`);
 
   // Session header card — shown once per session (not repeated on the first prompt).
   if (isFresh && !st.announced) {
-    await say({ thread_ts, text: `:thread: *New session* · dir \`${st.cwd}\` · agent \`${st.agent || 'default'}\`${st.model ? ` · model \`${st.model}\`` : ''}` });
+    await say({ thread_ts, text: `:thread: *New ${brain.displayName || brain.id || 'CLI'} session* · dir \`${st.cwd}\` · agent \`${st.agent || 'default'}\`${st.model ? ` · model \`${st.model}\`` : ''}${st.provider ? ` · provider \`${st.provider}\`` : ''}` });
     store.set(threadKey, { announced: true });
   }
 
   // Status via reaction; fall back to a text note if reactions aren't permitted.
   const reactedOk = await react(client, channel, reactTs, 'hourglass_flowing_sand');
-  if (!reactedOk) await say({ thread_ts, text: '🤔 Kiro is working…' });
+  if (!reactedOk) await say({ thread_ts, text: `🤔 ${brain.displayName || brain.id || 'CLI'} is working…` });
 
-  const brain = getBrain(st.brain);
   const beforeIds = isFresh ? new Set((await brain.listSessions(st.cwd)).map((s) => s.sessionId)) : new Set();
 
   const prog = { startedAt: Date.now(), buf: '' };
@@ -241,7 +270,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   const onData = (c) => { prog.buf += c; if (prog.buf.length > 24000) prog.buf = prog.buf.slice(-24000); };
 
   let res = await brain.runTurn({
-    cwd: st.cwd, sessionId: st.sessionId, agent: st.agent, model: st.model,
+    cwd: st.cwd, sessionId: st.sessionId, agent: st.agent, model: st.model, provider: st.provider, plan: st.mode === 'plan',
     trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
   });
   running.delete(threadKey);
@@ -260,13 +289,13 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
     await say({ thread_ts, text: '↻ Couldn’t resume the previous session — starting a fresh one for this thread.' });
     const before2 = new Set((await brain.listSessions(st.cwd)).map((s) => s.sessionId));
     res = await brain.runTurn({
-      cwd: st.cwd, sessionId: null, agent: st.agent, model: st.model,
+      cwd: st.cwd, sessionId: null, agent: st.agent, model: st.model, provider: st.provider, plan: st.mode === 'plan',
       trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
     });
     running.delete(threadKey);
     const sid2 = res.sessionId || await captureNewSession(brain, st.cwd, before2); if (sid2) store.set(threadKey, { sessionId: sid2 });
   } else if (isFresh) {
-    // Capture even on failure: a transient Kiro backend error still creates the
+    // Capture even on failure: a transient CLI backend error may still create the
     // session (with the user's message), so a retry can resume WITH context
     // instead of zoning out into a brand-new session.
     const sid = res.sessionId || await captureNewSession(brain, st.cwd, beforeIds);
@@ -295,11 +324,12 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   if (!res.ok && !res.output) {
     const st2 = store.get(threadKey);
     const hint = st2.sessionId
-      ? '\n\n_This turn failed (often a transient Kiro backend error). Just send your message again — the session is kept, so I retry with full context._'
+      ? `\n\n_This turn failed (often a transient ${brain.displayName || brain.id || 'CLI'} backend error). Just send your message again — the session is kept, so I retry with full context._`
       : '\n\n_This turn failed before a session was established. Send your message again to retry._';
-    return sayThread(say, thread_ts, `⚠️ ${res.error || `Kiro exited with code ${res.code}.`}${hint}`);
+    return sayThread(say, thread_ts, `⚠️ ${res.error || `${brain.displayName || brain.id || 'CLI'} exited with code ${res.code}.`}${hint}`);
   }
   await sendOutput({ client, say, channel, thread_ts, text: res.output, verbose: st.verbose });
+  if (res.usage) { store.set(threadKey, { lastUsage: res.usage, lastModel: res.model }); await sayThread(say, thread_ts, usageFooter(res.usage, res.model)); }
   if (!res.ok && res.error) await sayThread(say, thread_ts, `_error:_\n${res.error}`);
 }
 
@@ -308,6 +338,7 @@ async function startSession({ threadKey, rootTs, reactTs, channel, patch, prompt
     cwd: patch.cwd || DEFAULT_CWD,
     agent: patch.agent !== undefined ? patch.agent : DEFAULT_AGENT,
     model: patch.model !== undefined ? patch.model : DEFAULT_MODEL,
+    provider: patch.provider || null,
     brain: patch.brain || DEFAULT_BRAIN,
     verbose: patch.verbose !== undefined ? patch.verbose : true,
     sessionId: null,
@@ -315,7 +346,7 @@ async function startSession({ threadKey, rootTs, reactTs, channel, patch, prompt
   if (prompt) return runTurn({ threadKey, thread_ts: rootTs, reactTs, channel, prompt, say, client });
   const s = store.get(threadKey);
   store.set(threadKey, { announced: true });
-  return say({ thread_ts: rootTs, text: `:thread: *New session* · dir \`${s.cwd}\` · brain \`${s.brain || DEFAULT_BRAIN}\` · agent \`${s.agent || 'default'}\`\nReply in this thread to continue.` });
+  return say({ thread_ts: rootTs, text: `:thread: *New session* · dir \`${s.cwd}\` · brain \`${s.brain || DEFAULT_BRAIN}\` · agent \`${s.agent || 'default'}\`${s.provider ? ` · provider \`${s.provider}\`` : ''}\nReply in this thread to continue.` });
 }
 
 // Stop the running child for a thread (SIGTERM → SIGKILL after 3s). Returns true if something was killed.
@@ -381,10 +412,10 @@ async function applyAdmin(text, { threadKey, rootTs, say }) {
     }
     case 'recent': {
       const n = Math.min(parseInt(d.value, 10) || 8, 20);
-      const items = recentSessions(n);
+      const items = await allRecent(n);
       if (!items.length) return say({ thread_ts: rootTs, text: 'No sessions found.' });
-      const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title}\n   \`${s.id}\``).join('\n');
-      return say({ thread_ts: rootTs, text: `*Recent sessions:*\n${body}\n\n_Resume:_ \`!teleport <id>\`` });
+      const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title} · \`${s.brain}\`\n   \`${s.id}\``).join('\n');
+      return say({ thread_ts: rootTs, text: `*Recent sessions* (all brains):\n${body}\n\n_Resume:_ \`!teleport <id> <brain>\`` });
     }
     case 'teleport':
       return say({ thread_ts: rootTs, text: d.value ? `To resume that session, send \`!teleport ${d.value}\` as a *top-level* message.` : 'Which session id? See `!recent`.' });
@@ -431,7 +462,8 @@ async function resolvePending(st, text, { threadKey, rootTs, channel, say, clien
     if (c) {
       store.set(threadKey, { cwd: c.cwd || DEFAULT_CWD, agent: c.agent || DEFAULT_AGENT, brain: c.brain || DEFAULT_BRAIN, model: DEFAULT_MODEL, sessionId: c.sessionId, announced: true });
       try { memory().linkThread(threadKey, c.sessionId); } catch {}
-      const pid = sessionLock(c.sessionId);
+      const prep = await getBrain(c.brain || DEFAULT_BRAIN).prepareResume(c.sessionId);
+      const pid = prep && prep.pid;
       const warn = pid ? `\n:warning: This session is open in another live process (pid ${pid}) — resuming from two places can conflict.` : '';
       return say({ thread_ts: rootTs, text: `:leftwards_arrow_with_hook: Resuming *${c.title || c.sessionId.slice(0, 12)}* · brain \`${c.brain || '?'}\`.${warn}\nReply here to continue.` });
     }
@@ -464,44 +496,55 @@ async function handleMessage({ message, say, client }) {
   const lower = text.toLowerCase();
 
   // Global commands
-  if (lower === '!help') return say({ thread_ts: rootTs, text: helpText() });
+  if (lower === '!help') return say({ thread_ts: rootTs, text: helpText(store.has(threadKey) ? (store.get(threadKey).brain || DEFAULT_BRAIN) : null) });
   if (lower === '!agents') {
-    const cwd = store.has(threadKey) ? store.get(threadKey).cwd : DEFAULT_CWD;
-    const list = await listAgents(cwd);
+    const st = store.has(threadKey) ? store.get(threadKey) : { cwd: DEFAULT_CWD, brain: DEFAULT_BRAIN };
+    const brain = getBrain(st.brain);
+    const cwd = st.cwd || DEFAULT_CWD;
+    const list = await brain.listAgents(cwd);
     return say({ thread_ts: rootTs, text: list ? `*Agents* (in \`${cwd}\`):\n\`\`\`\n${list.slice(0, 3000)}\n\`\`\`` : 'Could not list agents.' });
   }
   if (lower === '!models') {
-    const models = await listModels();
+    const st = store.has(threadKey) ? store.get(threadKey) : { brain: DEFAULT_BRAIN };
+    const brain = getBrain(st.brain);
+    const models = await brain.listModels();
     return say({ thread_ts: rootTs, text: models.length ? `*Models:*\n${models.map((m) => `• \`${m}\``).join('\n')}\n\n_Set with_ \`!model <name>\`` : 'Could not list models.' });
   }
   if (lower.startsWith('!recent')) {
     const n = Math.min(parseInt(text.split(/\s+/)[1], 10) || 8, 20);
-    const items = recentSessions(n);
+    const items = await allRecent(n);
     if (!items.length) return say({ thread_ts: rootTs, text: 'No sessions found.' });
-    const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title}\n   \`${s.id}\`\n   ${s.agent || 'main'} · \`${s.cwd ? path.basename(s.cwd) : '~'}\` · ${rel(s.updatedAt)}`).join('\n\n');
-    return say({ thread_ts: rootTs, text: `*Recent Kiro sessions* (${items.length}):\n\n${body}\n\n_Continue any of them here with_ \`!teleport <sessionId>\`  ·  :lock: = currently open elsewhere` });
+    const body = items.map((s, i) => `*${i + 1}.* ${s.locked ? ':lock: ' : ''}${s.title}\n   \`${s.id}\` · brain \`${s.brain}\`\n   ${s.agent || '—'} · \`${s.cwd ? path.basename(s.cwd) : '~'}\` · ${rel(s.updatedAt)}`).join('\n\n');
+    return say({ thread_ts: rootTs, text: `*Recent sessions* (${items.length}, all brains):\n\n${body}\n\n_Continue any here with_ \`!teleport <sessionId> <brain>\`  ·  :lock: = open elsewhere` });
   }
   if (lower.startsWith('!teleport')) {
-    const { id, force } = parseTeleport(text);
-    if (!id) return say({ thread_ts: rootTs, text: 'Usage: `!teleport <sessionId> [force]` — pull a Kiro session into this thread. Add `force` to take over one that is open elsewhere. See `!recent`.' });
-    const info = getSessionInfo(id);
-    let lockPid = sessionLock(id);
+    const parts = text.split(/\s+/).slice(1).filter(Boolean);
+    const id = (parts[0] || '').trim();
+    const force = parts.some((p) => /^(force|--force|-f)$/i.test(p));
+    const brainArg = parts.slice(1).find((p) => hasBrain(p.toLowerCase()));
+    const brainId = (brainArg || DEFAULT_BRAIN).toLowerCase();
+    if (!id) return say({ thread_ts: rootTs, text: 'Usage: `!teleport <sessionId> [brain] [force]` — pull a session into this thread. Add `force` to take over one open in another process. See `!recent`.' });
+    const brain = getBrain(brainId);
+    const info = await brain.getSessionInfo(id);
+    const prep = brain.prepareResume ? await brain.prepareResume(id) : { action: 'ok' };
+    let lockPid = prep && prep.action === 'blocked' ? prep.pid : null;
     let takeoverNote = '';
-    if (lockPid && force) {
-      const r = forceUnlock(id);
-      takeoverNote = r.killed ? `\n\n:skull_and_crossbones: Terminated the process holding this session (pid ${r.killed}) — taken over here.` : '';
+    if (lockPid && force && brain.forceUnlock) {
+      const r = brain.forceUnlock(id);
+      takeoverNote = r && r.killed ? `\n\n:skull_and_crossbones: Terminated the process holding this session (pid ${r.killed}) — taken over here.` : '';
       lockPid = null;
     }
     store.set(threadKey, {
       cwd: (info && info.cwd) || DEFAULT_CWD,
       agent: (info && info.agent) || DEFAULT_AGENT,
+      brain: brain.id || brainId,
       model: DEFAULT_MODEL,
       verbose: true,
       sessionId: id,
       announced: true,
     });
     const meta = info
-      ? `${info.title ? `*${info.title.slice(0, 70)}*\n` : ''}dir \`${path.basename(info.cwd || '~')}\` · agent \`${info.agent || 'main'}\``
+      ? `${info.title ? `*${info.title.slice(0, 70)}*\n` : ''}dir \`${path.basename(info.cwd || '~')}\` · brain \`${brain.id || brainId}\` · agent \`${info.agent || 'main'}\``
       : '_(session file not found — using default dir; resume may start fresh)_';
     const lockWarn = lockPid
       ? `\n\n:warning: *This session is open in another process* (pid ${lockPid}) — likely a terminal/TUI. Continuing here at the same time gives stale, conflicting replies.\n   • To take over anyway, send \`!teleport ${id} force\` — that *terminates that process* (you'll lose any unsaved work there).`
@@ -554,16 +597,20 @@ async function handleMessage({ message, say, client }) {
           let turns = '';
           if (st.sessionId) {
             try {
-              const s = (await listSessions(st.cwd)).find((x) => x.sessionId === st.sessionId);
+              const s = (await getBrain(st.brain).listSessions(st.cwd)).find((x) => x.sessionId === st.sessionId);
               if (s) turns = `\n• turns: \`${s.messageCount}\``;
             } catch (e) { /* ignore */ }
           }
-          return say({ thread_ts: rootTs, text: `*Session* (idle)\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• verbose: \`${st.verbose ? 'on' : 'off'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
+          return say({ thread_ts: rootTs, text: `*Session* (idle)\n• brain: \`${st.brain || DEFAULT_BRAIN}\`\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• provider: \`${st.provider || '(default)'}\`\n• verbose: \`${st.verbose ? 'on' : 'off'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
         }
         case 'model':
           if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!model <name>` (or `!model clear`)' });
           store.set(threadKey, { model: arg.toLowerCase() === 'clear' ? null : arg });
           return say({ thread_ts: rootTs, text: `🧠 Model → \`${arg.toLowerCase() === 'clear' ? '(default)' : arg}\` (applies to your next message).` });
+        case 'provider':
+          if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!provider <name>` (or `!provider clear`)' });
+          store.set(threadKey, { provider: arg.toLowerCase() === 'clear' ? null : arg });
+          return say({ thread_ts: rootTs, text: `🏷️ Provider → \`${arg.toLowerCase() === 'clear' ? '(default)' : arg}\` (applies to your next message).` });
         case 'agent':
           if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!agent <name>`' });
           store.set(threadKey, { agent: arg });
@@ -581,6 +628,24 @@ async function handleMessage({ message, say, client }) {
           const on = !arg ? !cur : /^(on|true|yes|1)$/i.test(arg);
           store.set(threadKey, { verbose: on });
           return say({ thread_ts: rootTs, text: on ? '🗣️ Verbose ON — full tool trace shown for this session.' : '🤫 Verbose OFF — answers only (default).' });
+        }
+        case 'plan':
+        case 'act': {
+          const cur = store.get(threadKey) || {};
+          const b = getBrain(cur.brain || DEFAULT_BRAIN);
+          if (!(b.capabilities && b.capabilities.planMode)) {
+            return say({ thread_ts: rootTs, text: `Plan/act mode isn't available for \`${b.displayName || cur.brain || DEFAULT_BRAIN}\`.` });
+          }
+          const mode = cmd.toLowerCase();
+          store.set(threadKey, { mode });
+          return say({ thread_ts: rootTs, text: mode === 'plan'
+            ? '🗺️ *Plan mode* ON — your next messages plan before acting. `!act` to switch back.'
+            : '⚡ *Act mode* ON — your next messages act directly (default).' });
+        }
+        case 'usage': {
+          const cur = store.get(threadKey) || {};
+          if (!cur.lastUsage) return say({ thread_ts: rootTs, text: 'No usage recorded yet — run a turn first. (Some brains don’t report usage.)' });
+          return say({ thread_ts: rootTs, text: `*Last turn* · ${usageLine(cur.lastUsage, cur.lastModel)}` });
         }
         default:
           // Not a fast command → the MANAGER interprets it as natural-language admin.
@@ -628,7 +693,8 @@ const cfg = require('./config');
   if (errors) { console.error(`\n✗ ${errors} config error(s) — cannot start. Fix the above and retry.`); process.exit(1); }
   await app.start();
   try { const a = await app.client.auth.test(); BOT_USER_ID = a.user_id; console.log('   Bot user:', a.user_id, '| channels: @mention to start, reply to continue'); } catch (e) { console.warn('   ⚠ auth.test failed — channel @mention detection disabled:', e.message); }
-  console.log('⚡ Kiro Slack bridge running (Socket Mode) — thread = session.');
+  console.log('⚡ CLI Controller Slack bridge running (Socket Mode) — thread = session.');
+  console.log('   Default brain:', DEFAULT_BRAIN, '| available:', listBrains().join(', '));
   console.log('   Access:', ALLOW_ALL ? 'ALL users' : (ALLOWED.join(', ') || '(none)'));
   console.log('   Trust tools:', TRUST_TOOLS === 'ALL' ? 'ALL (full autonomy)' : (TRUST_TOOLS || '(none)'));
   console.log('   Default agent:', DEFAULT_AGENT, '| dir:', DEFAULT_CWD, '| timeout(ms):', TIMEOUT_MS || 'none');
@@ -637,7 +703,7 @@ const cfg = require('./config');
   console.log('   Broker:', BROKER_ON ? `on (${BROKER_MODEL})` : 'off');
   // Warm caches for the NL broker (best-effort, non-blocking).
   if (BROKER_ON) {
-    try { AGENTS_RAW = await listAgents(DEFAULT_CWD); } catch {}
-    try { MODELS_CACHE = await listModels(); } catch {}
+    try { AGENTS_RAW = await getBrain(DEFAULT_BRAIN).listAgents(DEFAULT_CWD); } catch {}
+    try { MODELS_CACHE = await getBrain(DEFAULT_BRAIN).listModels(); } catch {}
   }
 })();
