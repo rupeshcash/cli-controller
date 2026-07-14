@@ -17,6 +17,9 @@ All notable changes to this project. Format loosely follows Keep a Changelog; ve
 ### Security
 - Safe defaults: self-only allow-list, opt-in tool trust, `127.0.0.1`-only cockpit, secrets in a 0600 `.env`, stdin-fed prompts, no-shell spawns. See `SECURITY.md`.
 
+### Fixed
+- **Windows paths from the NL router no longer corrupt the cwd.** The broker's LLM returned Windows paths with single backslashes (`C:\Users\dev\proj`); `JSON.parse` either threw or silently mangled them (`\r`→CR → `C:Usersdev…`), so cline/kiro spawned in a nonexistent dir and failed with `spawn cmd.exe ENOENT`. The router prompt now requires forward-slash paths and presents workspace paths with forward slashes; `extractJson` parses both the raw and a backslash-repaired copy and keeps whichever yields a cwd free of control characters; the resolved cwd is normalized to forward slashes (valid as a cwd on Windows). Covered by `slack-bridge/test/broker.test.js`.
+
 ## [0.1.1]
 
 ### Added

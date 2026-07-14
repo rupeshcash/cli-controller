@@ -15,12 +15,13 @@ const BROKER_DIR = path.join(os.tmpdir(), 'kiro-broker');
 try { fs.mkdirSync(BROKER_DIR, { recursive: true }); } catch {}
 
 function buildPrompt(userText, ctx) {
+  const fwd = (p) => String(p == null ? '' : p).replace(/\\/g, '/'); // show paths with forward slashes (Windows-safe in JSON + as a cwd)
   const lines = [
     'You are the ROUTER for a Slack→Kiro-CLI bridge. Decide how to launch a Kiro coding session for the user\'s request.',
     'Respond with ONLY a single minified JSON object and NOTHING else (no prose, no code fences).',
     '',
     'JSON shape: {"cwd": string, "agent": string, "model": string|null, "brain": string, "prompt": string, "note": string}',
-    '- cwd: absolute directory to run in, chosen from the workspaces/presets below based on the request. If unclear, use the default.',
+    '- cwd: absolute directory to run in, chosen from the workspaces/presets below based on the request. If unclear, use the default. IMPORTANT: use FORWARD SLASHES only (e.g. "C:/Users/you/proj" on Windows, "/home/you/proj" on macOS/Linux) — never backslashes.',
     `- agent: one of the agents below. Default "${ctx.defaultAgent}".`,
     '- model: a model from the list below, or null for default. Map casual hints: opus->claude-opus-4.8, sonnet->claude-sonnet-5, haiku->claude-haiku-4.5.',
     `- brain: which AI tool runs the session, one of [${(ctx.brains || ['kiro']).join(', ')}]. Default "${ctx.defaultBrain || 'kiro'}". Map hints: "cline"->cline, "kiro"->kiro. Only change it if the user names a tool.`,
@@ -35,10 +36,10 @@ function buildPrompt(userText, ctx) {
     '  "in 2025 api use opus to fix the failing sla test" -> {"cwd":"<2025 api>","agent":"main","model":"claude-opus-4.8","prompt":"fix the failing sla test","note":"Routed to 2025 api with opus."}',
     '',
     'Workspaces (alias -> path):',
-    ...(Object.keys(ctx.aliases).length ? Object.entries(ctx.aliases).map(([k, v]) => `  ${k} -> ${v}`) : ['  (none)']),
+    ...(Object.keys(ctx.aliases).length ? Object.entries(ctx.aliases).map(([k, v]) => `  ${k} -> ${fwd(v)}`) : ['  (none)']),
     'Quick presets (name -> dir | model | agent):',
-    ...(Object.keys(ctx.quick).length ? Object.entries(ctx.quick).map(([k, v]) => `  ${k} -> ${v.cwd} | ${v.model || 'default'} | ${v.agent}`) : ['  (none)']),
-    `Default cwd: ${ctx.defaultCwd}`,
+    ...(Object.keys(ctx.quick).length ? Object.entries(ctx.quick).map(([k, v]) => `  ${k} -> ${fwd(v.cwd)} | ${v.model || 'default'} | ${v.agent}`) : ['  (none)']),
+    `Default cwd: ${fwd(ctx.defaultCwd)}`,
     'Available agents:',
     (ctx.agentsRaw || '(main, default)'),
     `Available models: ${(ctx.models || []).join(', ') || '(default)'}`,
@@ -54,7 +55,22 @@ function extractJson(s) {
   if (!s) return null;
   const m = s.match(/\{[\s\S]*\}/);
   if (!m) return null;
-  try { return JSON.parse(m[0]); } catch { return null; }
+  const raw = m[0];
+  // Windows paths: models routinely emit single backslashes ("C:\Users\dev\..").
+  // Some are invalid JSON escapes (\U, \D) → strict parse throws; others are valid
+  // escapes (\r, \n, \t in "\report", "\node", "\temp") → strict parse SUCCEEDS but
+  // silently corrupts the path (\r -> CR). So we parse BOTH the raw string and a
+  // backslash-repaired copy (every backslash doubled except one before a quote, which
+  // must stay a valid \" so the string still terminates), then prefer whichever gives
+  // a cwd with NO control characters — a real directory never contains CR/LF/TAB.
+  let strict = null;
+  let repaired = null;
+  try { strict = JSON.parse(raw); } catch { /* malformed under strict rules */ }
+  try { repaired = JSON.parse(raw.replace(/\\(?!")/g, '\\\\')); } catch { /* repair didn't parse */ }
+  const cwdHasControlChar = (o) => o && typeof o.cwd === 'string' && /[\u0000-\u001f]/.test(o.cwd);
+  if (strict && !cwdHasControlChar(strict)) return strict;
+  if (repaired && !cwdHasControlChar(repaired)) return repaired;
+  return strict || repaired || null;
 }
 
 async function route(userText, ctx, model) {
@@ -70,7 +86,7 @@ async function route(userText, ctx, model) {
   const j = extractJson(res && res.output);
   if (!j || !j.cwd) return null;
   return {
-    cwd: String(j.cwd),
+    cwd: String(j.cwd).replace(/\\/g, '/'), // normalize to forward slashes — valid as a cwd on Windows too
     agent: j.agent || ctx.defaultAgent,
     model: j.model || null,
     brain: (j.brain && (ctx.brains || []).includes(String(j.brain).toLowerCase())) ? String(j.brain).toLowerCase() : undefined,
@@ -124,4 +140,4 @@ async function routeAdmin(userText, ctx, model) {
   return { action: String(j.action).toLowerCase(), value: j.value != null ? String(j.value).trim() : null, note: (j.note || '').trim() };
 }
 
-module.exports = { route, routeAdmin, BROKER_DIR };
+module.exports = { route, routeAdmin, extractJson, buildPrompt, BROKER_DIR };
