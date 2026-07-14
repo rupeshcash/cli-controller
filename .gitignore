@@ -3,6 +3,7 @@
 **/.env.backup-*
 # runtime / generated
 **/state.json
+**/state.json.*
 **/macos-ca.pem
 **/bridge.log
 **/bridge.pid

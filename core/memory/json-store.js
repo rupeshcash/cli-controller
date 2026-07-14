@@ -66,7 +66,7 @@ class JsonMemory {
     switch (ev.type) {
       case 'session': {
         const cur = this.sessions.get(ev.sessionId) || { sessionId: ev.sessionId, turns: 0, tags: [], createdAt: ev.ts, status: 'open' };
-        this.sessions.set(ev.sessionId, { ...cur, brain: ev.brain ?? cur.brain, cwd: ev.cwd ?? cur.cwd, title: ev.title ?? cur.title, updatedAt: ev.ts, _seq: seq });
+        this.sessions.set(ev.sessionId, { ...cur, brain: ev.brain ?? cur.brain, cwd: ev.cwd ?? cur.cwd, agent: ev.agent ?? cur.agent, title: ev.title ?? cur.title, updatedAt: ev.ts, _seq: seq });
         break;
       }
       case 'turn': {
@@ -87,7 +87,7 @@ class JsonMemory {
   }
 
   // ── write API (all best-effort, never throw) ──
-  recordSession({ sessionId, brain, cwd, title } = {}) { if (sessionId) this._append({ type: 'session', ts: Date.now(), sessionId, brain, cwd, title }); }
+  recordSession({ sessionId, brain, cwd, title, agent } = {}) { if (sessionId) this._append({ type: 'session', ts: Date.now(), sessionId, brain, cwd, title, agent }); }
   recordTurn({ sessionId, prompt, summary, tags } = {}) { if (sessionId) this._append({ type: 'turn', ts: Date.now(), sessionId, prompt, summary, tags }); }
   endSession(sessionId) { if (sessionId) this._append({ type: 'end', ts: Date.now(), sessionId }); }
   linkThread(threadKey, sessionId) { if (threadKey && sessionId) this._append({ type: 'thread', ts: Date.now(), threadKey, sessionId }); }
