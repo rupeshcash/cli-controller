@@ -230,6 +230,22 @@ async function captureNewSession(brain, cwd, beforeIds) {
   return (fresh && fresh.sessionId) || null;
 }
 
+// Copyable terminal-resume command for a session — built from the brain's OWN
+// recipe (brain-agnostic: each adapter supplies buildResumeCommand). Kiro emits
+// `cd <cwd> && kiro-cli chat --agent <a> --resume-id <id>`; Cline emits its own.
+// Returns null if the brain doesn't expose one, so callers stay generic.
+function resumeCommand(brain, st, sid) {
+  if (!sid || !brain || typeof brain.buildResumeCommand !== 'function') return null;
+  try { return brain.buildResumeCommand({ id: sid, sessionId: sid, cwd: st.cwd, agent: st.agent }) || null; }
+  catch { return null; }
+}
+// One-time Slack block: "resume this session in your terminal" with a copyable command.
+function terminalResumeLine(brain, st, sid) {
+  const cmd = resumeCommand(brain, st, sid);
+  if (!cmd) return null;
+  return `:desktop_computer: *Resume in terminal* (session \`${String(sid).slice(0, 12)}…\`):\n\`\`\`\n${cmd}\n\`\`\``;
+}
+
 // Recent sessions across ALL brains (Kiro + Cline + …), newest first, tagged with brain.
 async function allRecent(n) {
   const lists = await Promise.all(listBrains().map(async (b) => {
@@ -295,13 +311,14 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
       trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
     });
     running.delete(threadKey);
-    const sid2 = res.sessionId || await captureNewSession(brain, st.cwd, before2); if (sid2) store.set(threadKey, { sessionId: sid2 });
+    const sid2 = res.sessionId || await captureNewSession(brain, st.cwd, before2);
+    if (sid2) { store.set(threadKey, { sessionId: sid2 }); persistThreadLink(threadKey, sid2, prompt); const line = terminalResumeLine(brain, st, sid2); if (line) await say({ thread_ts, text: line }); }
   } else if (isFresh) {
     // Capture even on failure: a transient CLI backend error may still create the
     // session (with the user's message), so a retry can resume WITH context
     // instead of zoning out into a brand-new session.
     const sid = res.sessionId || await captureNewSession(brain, st.cwd, beforeIds);
-    if (sid) store.set(threadKey, { sessionId: sid });
+    if (sid) { store.set(threadKey, { sessionId: sid }); persistThreadLink(threadKey, sid, prompt); const line = terminalResumeLine(brain, st, sid); if (line) await say({ thread_ts, text: line }); }
   }
   progress.delete(threadKey);
 
@@ -317,7 +334,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
     const st2 = store.get(threadKey);
     if (st2 && st2.sessionId) {
       const mem = require('../../core/memory').memory();
-      mem.recordSession({ sessionId: st2.sessionId, brain: st2.brain || DEFAULT_BRAIN, cwd: st2.cwd, title: (prompt || '').slice(0, 70) });
+      mem.recordSession({ sessionId: st2.sessionId, brain: st2.brain || DEFAULT_BRAIN, cwd: st2.cwd, agent: st2.agent, title: (prompt || '').slice(0, 70) });
       mem.recordTurn({ sessionId: st2.sessionId, prompt, summary: (res.output || res.error || '').slice(0, 240), tags: [st2.brain || DEFAULT_BRAIN, path.basename(st2.cwd || '')].filter(Boolean) });
       mem.linkThread(threadKey, st2.sessionId);
     }
@@ -348,7 +365,7 @@ async function startSession({ threadKey, rootTs, reactTs, channel, patch, prompt
   if (prompt) return runTurn({ threadKey, thread_ts: rootTs, reactTs, channel, prompt, say, client });
   const s = store.get(threadKey);
   store.set(threadKey, { announced: true });
-  return say({ thread_ts: rootTs, text: `:thread: *New session* · dir \`${s.cwd}\` · brain \`${s.brain || DEFAULT_BRAIN}\` · agent \`${s.agent || 'default'}\`${s.provider ? ` · provider \`${s.provider}\`` : ''}\nReply in this thread to continue.` });
+  return say({ thread_ts: rootTs, text: `:thread: *New session* · dir \`${s.cwd}\` · brain \`${s.brain || DEFAULT_BRAIN}\` · agent \`${s.agent || 'default'}\`${s.provider ? ` · provider \`${s.provider}\`` : ''}\nReply in this thread to continue. _(terminal-resume command posts once it starts; or \`!status\`)_` });
 }
 
 // Stop the running child for a thread (SIGTERM → SIGKILL after 3s). Returns true if something was killed.
@@ -448,7 +465,7 @@ async function brokerStart({ text, tkey, rt, channel, say, client }) {
       try { memory().recordDecision({ userText: text, decision: { cwd: decision.cwd, brain: decision.brain || DEFAULT_BRAIN, agent: decision.agent, model: decision.model }, outcome: decision.prompt ? 'ran' : 'opened' }); } catch {}
       await say({ thread_ts: rt, text: `:compass: *${decision.note || 'Routed'}*\ndir \`${path.basename(decision.cwd)}\` · brain \`${decision.brain || DEFAULT_BRAIN}\` · agent \`${decision.agent || DEFAULT_AGENT}\`${decision.model ? ` · model \`${decision.model}\`` : ''}` });
       if (decision.prompt) return runTurn({ threadKey: tkey, thread_ts: rt, reactTs: rt, channel, prompt: decision.prompt, say, client });
-      return say({ thread_ts: rt, text: 'Reply in this thread to continue.' });
+      return say({ thread_ts: rt, text: 'Reply in this thread to continue. _(Once it starts I’ll post a copyable terminal-resume command — or run `!status` any time.)_' });
     }
   }
   return startSession({ threadKey: tkey, rootTs: rt, reactTs: rt, channel, patch: {}, prompt: text, say, client });
@@ -475,6 +492,43 @@ async function resolvePending(st, text, { threadKey, rootTs, channel, say, clien
   return brokerStart({ text, tkey: threadKey, rt: rootTs, channel, say, client });
 }
 
+// Rehydrate a thread whose in-memory/state.json session was lost (e.g. bridge
+// restarted, or state.json was wiped) from the durable append-only memory log,
+// which records threadKey -> session via linkThread(). Returns the recovered
+// session id, or null if the memory has never seen this thread.
+function recoverThread(threadKey) {
+  try {
+    const rec = memory().getByThread(threadKey);
+    if (rec && rec.sessionId) {
+      store.set(threadKey, {
+        cwd: rec.cwd || DEFAULT_CWD,
+        agent: rec.agent || DEFAULT_AGENT,
+        brain: rec.brain || DEFAULT_BRAIN,
+        model: DEFAULT_MODEL,
+        verbose: true,
+        sessionId: rec.sessionId,
+        announced: true,
+      });
+      return rec.sessionId;
+    }
+  } catch (_) { /* memory is best-effort */ }
+  return null;
+}
+
+// Durably link a Slack thread to its session in the append-only memory log the
+// INSTANT the session id is known — not just at end-of-turn. This is the source
+// recoverThread() reads, so writing it early guarantees a thread stays
+// recoverable even if the process dies mid-turn.
+function persistThreadLink(threadKey, sessionId, prompt) {
+  if (!sessionId) return;
+  try {
+    const s = store.get(threadKey);
+    const mem = memory();
+    mem.recordSession({ sessionId, brain: s.brain || DEFAULT_BRAIN, cwd: s.cwd, agent: s.agent, title: (prompt || '').slice(0, 70) });
+    mem.linkThread(threadKey, sessionId);
+  } catch (_) { /* memory is best-effort */ }
+}
+
 async function handleMessage({ message, say, client }) {
   // Let file uploads through (subtype 'file_share' carries message.files[]); still ignore
   // edits/joins/other subtypes and any bot messages (incl. our own).
@@ -497,7 +551,11 @@ async function handleMessage({ message, say, client }) {
   const isThreadReply = !!message.thread_ts && message.thread_ts !== message.ts;
   const rootTs = message.thread_ts || message.ts;
   const threadKey = `${channel}:${rootTs}`;
-  if (isChannel && !mentioned && !(isThreadReply && store.has(threadKey))) return; // ignore unrelated channel chatter
+  // A thread is "known" if we have live state OR the durable memory log has it
+  // linked (survives a state.json wipe / bridge restart).
+  function memoryKnowsThread(k) { try { return !!memory().getByThread(k); } catch { return false; } }
+  const threadKnown = store.has(threadKey) || (isThreadReply && memoryKnowsThread(threadKey));
+  if (isChannel && !mentioned && !(isThreadReply && threadKnown)) return; // ignore unrelated channel chatter
 
   // ── Attachments: images + text snippets → forwarded to the brain (and, as text, to the manager) ──
   // Image forwarding is gated on the target brain's `images` capability (Kiro: yes, Cline: not yet).
@@ -588,7 +646,17 @@ async function handleMessage({ message, say, client }) {
   // ── Inside a thread → continue / control that session ──
   if (isThreadReply) {
     if (!store.has(threadKey)) {
-      return say({ thread_ts: rootTs, text: 'This thread has no session. Just send a new message at the top level to start one.' });
+      // The thread's session was lost (bridge restart, or state.json was wiped).
+      // Recover it from the durable memory log rather than dead-ending.
+      const recoveredId = recoverThread(threadKey);
+      if (recoveredId) {
+        await say({ thread_ts: rootTs, text: `:leftwards_arrow_with_hook: Recovered this thread's session (\`${recoveredId.slice(0, 12)}…\`) from memory — continuing.` });
+      } else {
+        // Never seen this thread → don't abandon it. Treat the reply as a fresh
+        // task IN this thread so the user keeps working here.
+        await say({ thread_ts: rootTs, text: ":information_source: I lost this thread's session (the bridge likely restarted). Starting a fresh session here from your message." });
+        return brokerStart({ text, tkey: threadKey, rt: rootTs, channel, say, client });
+      }
     }
     const stCur = store.get(threadKey);
     // MANAGER_PENDING: the manager asked resume-vs-new; this reply is the answer.
@@ -625,7 +693,9 @@ async function handleMessage({ message, say, client }) {
               if (s) turns = `\n• turns: \`${s.messageCount}\``;
             } catch (e) { /* ignore */ }
           }
-          return say({ thread_ts: rootTs, text: `*Session* (idle)\n• brain: \`${st.brain || DEFAULT_BRAIN}\`\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• provider: \`${st.provider || '(default)'}\`\n• verbose: \`${st.verbose ? 'on' : 'off'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`` });
+          const rcmd = resumeCommand(getBrain(st.brain), st, st.sessionId);
+          const resumeSuffix = rcmd ? `\n• resume in terminal:\n\`\`\`\n${rcmd}\n\`\`\`` : '';
+          return say({ thread_ts: rootTs, text: `*Session* (idle)\n• brain: \`${st.brain || DEFAULT_BRAIN}\`\n• dir: \`${st.cwd}\`\n• agent: \`${st.agent || '(default)'}\`\n• model: \`${st.model || '(default)'}\`\n• provider: \`${st.provider || '(default)'}\`\n• verbose: \`${st.verbose ? 'on' : 'off'}\`${turns}\n• sessionId: \`${st.sessionId || '(pending)'}\`${resumeSuffix}` });
         }
         case 'model':
           if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!model <name>` (or `!model clear`)' });

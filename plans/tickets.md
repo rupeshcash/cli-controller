@@ -4,6 +4,38 @@ Running log of deferred work and follow-ups. One entry per ticket.
 
 ---
 
+## CLI-TELE-1 — Cline: guard concurrent terminal + Slack use of a resumed session 🔜 (TODO)
+
+**Status:** Deferred (Cline not actively developed).
+
+**Context.** The bridge now surfaces a copyable *terminal-resume* command when a session starts
+and in `!status` (brain-agnostic, via `adapter.buildResumeCommand` — `slack-bridge/src/index.js`).
+This lets a user pull a bridge-created session back into their terminal.
+
+**The gap (Cline-only).** Cline has **no single-writer lock** (`capabilities.singleWriterLock = false`
+in `core/brain/cline.js`; its `prepareResume` always returns `{ action: 'ok' }`). So if a user resumes
+a Cline session in the terminal AND keeps replying to the same session in the Slack thread, **both
+processes write to the same session concurrently with no protection and no warning** — interleaved /
+conflicting history.
+
+Kiro is safe here: it holds a `.lock` during a turn, `prepareResume` detects a live PID, and the bridge
+refuses (offers `!teleport <id> force`). None of that exists for Cline.
+
+**TODO when Cline is revisited:**
+- [ ] Confirm whether the `cline` CLI writes a lock / has any concurrency guard on `--id` resume.
+- [ ] If not, add a soft guard: on Cline resume, warn that the session may be open elsewhere and that
+      concurrent terminal + Slack use can corrupt history (no hard lock to rely on).
+- [ ] Consider a lightweight bridge-side advisory lock (last-writer pid/ts in memory store) so at least
+      the bridge can warn when it recently ran a turn that the terminal might now be racing.
+- [ ] Decide whether `!teleport … force` should mean anything for a lock-less brain (currently a no-op).
+- [ ] Do NOT special-case Kiro in the shared teleport/resume path — keep the guard behind a brain
+      capability flag (e.g. reuse/extend `singleWriterLock`) so it stays generic.
+
+**Do not overfit to Kiro** while implementing the resume-command feature — the terminal-resume surfacing
+is already brain-agnostic; this ticket only tracks the Cline-specific safety gap.
+
+---
+
 ## CLI-IMG-1 — Slack image + text-snippet forwarding to Kiro ✅ (shipped)
 
 **Status:** Done (2026-07-14, branch `feat/cline-support-main`).
