@@ -222,12 +222,28 @@ async function unreact(client, channel, ts, name) {
 }
 
 // The session a fresh run created = the id present now but not before.
+// STRICT: only attribute a session when EXACTLY ONE new one appeared in the cwd.
+// If another session is created in the same cwd during the turn window (a second
+// Slack thread, or a terminal kiro-cli in the same dir), more than one "new" id
+// shows up — we then refuse to guess rather than hijack a stranger's session
+// (the root cause of cross-thread contamination). Zero new = turn created none.
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function captureNewSession(brain, cwd, beforeIds) {
   const now = await brain.listSessions(cwd);
-  const fresh = now.find((s) => !beforeIds.has(s.sessionId));
-  // Only return a genuinely-new session. NEVER fall back to an existing one —
-  // that would silently latch the thread onto an unrelated conversation.
-  return (fresh && fresh.sessionId) || null;
+  const fresh = now.filter((s) => s && s.sessionId && !beforeIds.has(s.sessionId));
+  if (fresh.length !== 1) {
+    if (fresh.length > 1) {
+      console.warn(`[capture] ${cwd}: ${fresh.length} new sessions appeared during the turn — refusing to guess which is ours (prevents cross-session contamination). Thread will start fresh on next reply.`);
+    }
+    return null;
+  }
+  const id = fresh[0].sessionId;
+  // Guard against a malformed listing yielding a non-id token (produced the stray "the" in state.json).
+  if (!SESSION_ID_RE.test(id)) {
+    console.warn(`[capture] ${cwd}: captured session id is not a UUID (${JSON.stringify(id)}) — ignoring.`);
+    return null;
+  }
+  return id;
 }
 
 // Recent sessions across ALL brains (Kiro + Cline + …), newest first, tagged with brain.
