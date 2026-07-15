@@ -11,6 +11,7 @@ const cfg = require('./src/config');
 const ok = (m) => console.log('   ✓ ' + m);
 const warn = (m) => console.warn('   ⚠ ' + m);
 const bad = (m) => console.error('   ✗ ' + m);
+const note = (m) => console.log('   · ' + m);
 let errors = 0, warns = 0;
 const mark = (c) => { if (c.level === 'error') { errors++; bad(c.msg); } else if (c.level === 'warn') { warns++; warn(c.msg); } else ok(c.msg); };
 
@@ -19,11 +20,27 @@ function nodeCheck() {
   mark({ level: major >= 18 ? 'ok' : 'warn', msg: `Node ${process.versions.node}${major >= 18 ? '' : ' (recommend ≥ 18)'}` });
 }
 
-function kiroCheck() {
-  const bin = process.env.KIRO_BIN || 'kiro-cli';
+function brainCheck(label, envVar, defaultBin, hint) {
+  const bin = process.env[envVar] || defaultBin;
   const r = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 6000, shell: process.platform === 'win32' });
-  if (r.error || r.status !== 0) { warns++; warn(`Kiro brain: '${bin}' not found or not runnable on PATH.`); }
-  else ok(`Kiro brain: ${(r.stdout || r.stderr || '').trim().split('\n')[0] || bin}`);
+  const found = !(r.error || r.status !== 0);
+  if (found) ok(`${label} brain: ${(r.stdout || r.stderr || '').trim().split('\n')[0] || bin}`);
+  return { label, bin, found, hint };
+}
+
+// A correct setup needs AT LEAST ONE brain. A missing brain you don't use is not a
+// problem, so it stays informational (keeps doctor green); zero brains is an error.
+function brainsCheck() {
+  const results = [
+    brainCheck('Kiro', 'KIRO_BIN', 'kiro-cli', ''),
+    brainCheck('Cline', 'CLINE_BIN', 'cline', 'npm i -g cline'),
+  ];
+  const anyFound = results.some((r) => r.found);
+  for (const r of results.filter((r) => !r.found)) {
+    const msg = `${r.label} brain: '${r.bin}' not found on PATH${r.hint ? ` (${r.hint})` : ''}.`;
+    if (anyFound) note(msg); else { errors++; bad(msg); }
+  }
+  if (!anyFound) bad('No AI brain found — install kiro-cli or run `npm i -g cline`.');
 }
 
 function bridgeCheck() {
@@ -50,7 +67,7 @@ function portCheck() {
   console.log('🩺 cli-controller doctor\n');
   nodeCheck();
   cfg.validate(process.env).forEach(mark);
-  kiroCheck();
+  brainsCheck();
   bridgeCheck();
   await portCheck();
   console.log(`\n${errors ? '✗' : (warns ? '⚠' : '✓')} ${errors} error(s), ${warns} warning(s).`);

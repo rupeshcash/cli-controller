@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const { execSync, spawn } = require('child_process');
 const os = require('os');
+const lc = require('../lib/lifecycle');
+const { caEnv } = require('../lib/ca');
 const { getBrain, listBrains, brains: BRAINS } = require('../core/brain');
 const runner = require('../core/runner');
 const { memory } = require('../core/memory');
@@ -82,9 +84,20 @@ app.get('/api/status', (req, res) => {
 });
 
 // ── API: Bridge control ───────────────────────────────
+// Cross-platform: use the same Node lifecycle lib as `bin/cli-controller.js`
+// (no `bash`). caEnv() provisions OS/corporate CA so Socket Mode TLS works.
+const bridgeSvc = {
+  name: 'bridge', cwd: BRIDGE_DIR,
+  args: [path.join(BRIDGE_DIR, 'src', 'index.js')],
+  pidFile: BRIDGE_PID, logFile: BRIDGE_LOG, env: caEnv(BRIDGE_DIR),
+};
 function bridgeCmd(cmd) {
-  try { return execSync(`bash ${path.join(BRIDGE_DIR, 'bridge')} ${cmd}`, { encoding: 'utf8', timeout: 15000 }).trim(); }
-  catch (e) { return e.stdout || e.message; }
+  try {
+    if (cmd === 'start') { const r = lc.start(bridgeSvc); return r.already ? `bridge already running (pid ${r.pid})` : `bridge started (pid ${r.pid})`; }
+    if (cmd === 'stop') { const r = lc.stop(bridgeSvc); return r.stopped ? `bridge stopped (pid ${r.pid})` : 'bridge not running'; }
+    if (cmd === 'restart') { const r = lc.restart(bridgeSvc); return `bridge restarted (pid ${r.pid})`; }
+    return `unknown command: ${cmd}`;
+  } catch (e) { return e.message; }
 }
 app.post('/api/bridge/start', (req, res) => res.json({ ok: true, msg: bridgeCmd('start') }));
 app.post('/api/bridge/stop', (req, res) => res.json({ ok: true, msg: bridgeCmd('stop') }));
@@ -94,7 +107,8 @@ app.get('/api/bridge/logs', (req, res) => {
   const n = Math.min(parseInt(req.query.n) || 80, 500);
   const filter = (req.query.filter || '').toLowerCase();
   try {
-    let lines = execSync(`tail -n ${n * 3} "${BRIDGE_LOG}"`, { encoding: 'utf8' })
+    // Pure-Node tail (no `tail` binary → works on Windows too).
+    let lines = fs.readFileSync(BRIDGE_LOG, 'utf8')
       .replace(/xox[bp]-[A-Za-z0-9-]+/g, '[REDACTED]').split('\n');
     if (filter) lines = lines.filter(l => l.toLowerCase().includes(filter));
     res.json({ lines: lines.slice(-n) });

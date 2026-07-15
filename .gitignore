@@ -1,5 +1,9 @@
-# secrets — NEVER commit
+# secrets — NEVER commit (all .env variants, but keep the example)
 **/.env
+**/.env.*
+!**/.env.example
+# local agent/editor workspace config (not part of the product)
+.kiro/
 # runtime / generated
 **/state.json
 **/macos-ca.pem
