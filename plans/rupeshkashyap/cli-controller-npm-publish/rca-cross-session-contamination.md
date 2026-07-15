@@ -4,7 +4,7 @@
 > **Author**: rupeshcash (via kiro)
 > **Created**: 2026-07-15
 > **Last updated**: 2026-07-15
-> **Status**: in-progress
+> **Status**: complete
 
 ## TL;DR
 
@@ -82,11 +82,11 @@ Contributing conditions in the incident:
 
 With strict capture, the bridge can never latch a thread onto another thread's session. Worst case under concurrency is a missed capture (next reply starts fresh, losing that turn's context) — a lesser, non-corrupting failure.
 
-### Proposed follow-up — per-cwd creation serialization (full correctness)
-To make "exactly one new session" the *normal* outcome even when two fresh threads start in the same cwd at once, serialize only the **creation window** per cwd (snapshot → spawn → first-detection), releasing before awaiting full turn output so long turns don't block parallel work. This needs a small restructure of the spawn/capture path and is proposed separately because it touches the hottest code path and has a parallelism trade-off to confirm.
+### Applied — per-cwd creation serialization (full correctness)
+Implemented in `slack-bridge/src/capture.js` (`withCwdLock`, `pollForNewSession`) and wired into `runTurn`. Fresh turns now hold a per-cwd lock only for the creation window (snapshot → spawn → first-detection), releasing before the full turn is awaited so long turns don't block parallel work. This makes "exactly one new session" the normal outcome for bridge-initiated fresh turns, so the strict guard captures correctly instead of degrading to a miss. Covered by `slack-bridge/test/capture.test.js` (9 tests). Applied to both the main fresh path and the resume-failure fallback.
 
 ### State cleanup
-`state.json` already contains contaminated mappings (shared sessionIds) and one `"the"`. These persist across restarts. Recommend: null out the `"the"` entry, and optionally reset sessionId for thread keys that share an id, so affected threads start clean.
+The bridge overwrites `state.json` from memory while running, so cleanup runs during the restart (after stop, before start): non-UUID sessionIds (the `"the"` entry) are nulled so those threads start clean. Already-merged duplicate-sessionId mappings are left as-is (auto-splitting would guess which thread keeps context); they no longer grow because contamination is fixed going forward.
 
 ## Verification
 

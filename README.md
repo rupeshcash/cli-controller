@@ -1,184 +1,129 @@
 # cli-controller
 
-Drive AI coding agents from **Slack** or a local **web cockpit**, straight from your phone, no SSH. Start a thread, tell it what to do, and a local manager routes the work to a coding CLI (Kiro or Cline today) running on your own machine. Local-first, single-user, no server.
+**Text your coding agent. From anywhere.** Open a Slack thread, say what you want, and a local manager runs it through Kiro or Cline on your own machine. No SSH, no public URL, no server. Just your phone and a thread.
 
 ```mermaid
 flowchart LR
     A["You (phone / desktop)"] --> B["Slack thread"]
-    B --> C["Manager (routing + memory)"]
+    B --> C["Manager · routing + memory"]
     C --> D["Kiro / Cline on your machine"]
     D --> B
 ```
 
-Slack's official **Socket Mode** makes this safe: the bot opens an outbound WebSocket, so there is no public URL, no port forwarding, and no account-ban risk that unofficial chat bridges carry (background in [`evaluation.md`](evaluation.md)).
+It runs over Slack's official **Socket Mode**, so the bot dials out over a WebSocket. Nothing listens on your machine, nothing is exposed, and no unofficial chat library can get your account banned (the full comparison lives in [`evaluation.md`](evaluation.md)).
 
 ---
 
-## What you can do
-
-- **Thread = session.** Each top-level message opens its own session in a thread. Reply in the thread to continue that session. Different threads run in parallel.
-- **Talk normally, or command with `!`.** A plain reply goes to the coding agent. A message starting with `!` talks to the manager: `!use cline`, `!model opus`, `!abort`, `!recall the auth bug`. Fast commands (`!abort`, `!status`, `!end`) skip the LLM and run instantly.
-- **Pick a brain per session.** Kiro and Cline today, behind one adapter. Adding a brain is a single file.
-- **Persistent memory.** Every turn is saved locally. The manager can search and cross-reference past sessions with `!recall` or the cockpit.
-- **Web cockpit.** Browse, search, and filter every session (terminal and Slack), start or continue sessions in the browser, and control the bridge at `http://localhost:1234`.
-- **Channels, not only DMs.** `@mention` the bot to start in a channel and reply in-thread to continue. The allow-list still controls who can run code.
-
----
-
-## First-time setup
-
-Two things run on your machine: the **Slack bridge** and the **web cockpit**. You need a Slack app (about 5 minutes) and one coding CLI on your PATH.
-
-### Prerequisites
-
-- **Node.js 18+** (`node -v`)
-- At least one brain CLI installed and authenticated:
-  - Kiro: `kiro-cli chat --list-models` should succeed
-  - Cline: `npm i -g cline`
-
-### Step 1 — Create the Slack app
-
-> **On a work laptop and can't add apps to the company workspace?** Create a free personal Slack workspace, build the app there, and add that workspace to the Slack client you already use. You will DM the bot in your personal workspace, so no corporate admin is needed.
-
-1. Open **https://api.slack.com/apps** and choose **Create New App → From scratch**. Name it (for example `Kiro Bridge`) and pick your workspace.
-2. **Socket Mode** (left sidebar) → turn **Enable Socket Mode** on. When prompted, create an **App-Level Token** with the `connections:write` scope. Copy it. This is your **`SLACK_APP_TOKEN`** (starts with `xapp-`).
-3. **OAuth & Permissions → Bot Token Scopes** → add:
-   - `chat:write`
-   - `im:history`, `im:read`, `im:write`
-   - `files:write` (uploads long output as a file snippet)
-   - `reactions:write` (optional, enables the ⏳ / ✅ / ❌ status reactions)
-4. **Event Subscriptions** → turn **Enable Events** on → under **Subscribe to bot events** add `message.im`. Socket Mode delivers these over the WebSocket, so no Request URL is needed.
-5. **App Home → Show Tabs** → enable the **Messages Tab** and check **"Allow users to send Slash commands and messages from the messages tab."**
-6. **Install App → Install to Workspace** and approve. Copy the **Bot User OAuth Token**. This is your **`SLACK_BOT_TOKEN`** (starts with `xoxb-`).
-7. Get your own Slack member ID: profile → **⋮ (More) → Copy member ID** (starts with `U`).
-
-> Want to drive the bot from channels too? See the channel scopes and events in [`slack-bridge/SETUP.md`](slack-bridge/SETUP.md).
-
-### Step 2 — Install and configure
+## 60-second start
 
 ```bash
 npm install -g cli-controller-lib
-cli-controller                 # first run launches the setup wizard
+cli-controller                 # launches the setup wizard
 ```
 
-The wizard detects your brain, captures and validates the two Slack tokens, sets the allow-list to just you, writes the config, and offers to start the bridge and cockpit. When it finishes, open Slack and DM your bot.
+The wizard finds your coding CLI, takes your two Slack tokens, validates them live, locks the allow-list to just you, and starts everything. Then you DM your bot. That is the whole install.
 
-Prefer to configure by hand? Copy `slack-bridge/.env.example` to `slack-bridge/.env` and fill in:
-
-```
-SLACK_BOT_TOKEN=xoxb-...        # step 6 (Bot User OAuth Token)
-SLACK_APP_TOKEN=xapp-...        # step 2 (App-Level Token, Socket Mode)
-SLACK_ALLOWED_USER_IDS=U0XXXX   # step 7 (your member ID, comma-separate for more)
-KIRO_DEFAULT_CWD=/path/to/repo  # the directory the agent works in
-KIRO_TRUST_TOOLS=fs_read        # read-only, the safe default
-```
-
-`.env` is gitignored, so your tokens are never committed.
-
-### Step 3 — Run it
-
-```bash
-cli-controller start           # bridge + cockpit
-cli-controller status
-```
-
-Open Slack, DM your bot, and try:
-
-```
-!help
-Summarize the README in this repo.
-```
+You need **Node 18+** and one coding CLI on your PATH:
+- **Kiro** — `kiro-cli chat --list-models` should work
+- **Cline** — `npm i -g cline`
 
 ---
 
-## Everyday commands
+## Get the two Slack tokens (about 5 minutes)
 
-| In a thread | What it does |
-|---|---|
-| plain text | Sent to the coding agent as a prompt |
-| `!abort` | Stop the current run |
-| `!status` / `!peek` | Session info, or elapsed time if a turn is running |
-| `!model <name>` | Set the model for the next turn |
-| `!agent <name>` | Set the agent / context profile |
-| `!use <brain>` | Switch brain (`kiro` / `cline`) |
-| `!end` | Close the session |
+> **Work laptop where you can't add apps?** Spin up a free personal Slack workspace, build the app there, and add it to the Slack client you already have. No admin needed.
 
-| Anywhere | What it does |
+At **https://api.slack.com/apps → Create New App → From scratch**:
+
+1. **Socket Mode** → turn it **on**. Generate an **App-Level Token** with `connections:write`. That is your **`xapp-`** token.
+2. **OAuth & Permissions → Bot Token Scopes** → add: `chat:write`, `im:history`, `im:read`, `im:write`, `files:write`, and `reactions:write` (for the ⏳ / ✅ / ❌ status ticks).
+3. **Event Subscriptions** → turn **on** → subscribe to `message.im`.
+4. **App Home** → enable the **Messages Tab** and allow messages from it.
+5. **Install to Workspace** → copy the **Bot User OAuth Token**. That is your **`xoxb-`** token.
+6. Your member ID: profile → **⋮ → Copy member ID** (starts with `U`).
+
+Paste both tokens and your member ID into the wizard when it asks. Done. (Driving it from channels too? See [`slack-bridge/SETUP.md`](slack-bridge/SETUP.md).)
+
+Prefer manual config? Copy `slack-bridge/.env.example` to `slack-bridge/.env`, fill in `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_ALLOWED_USER_IDS`, and `KIRO_DEFAULT_CWD`. `.env` is gitignored.
+
+---
+
+## Living in it
+
+**A thread is a session.** Your first message opens one. Every reply continues it. Different threads run in parallel, each with its own context.
+
+**Plain text goes to the agent. `!` goes to the manager.**
+
+```
+Refactor the auth middleware and add tests.      ← the agent works
+!model opus                                       ← manager, next turn uses opus
+!abort                                            ← manager, stops now
+```
+
+| In a thread | |
 |---|---|
-| plain top-level message | Manager routes it and opens a new session |
-| `!new [dir=… model=… agent=…] <task>` | Start an explicit session, skip routing |
-| `!recent [n]` | Recent sessions across all brains (🔒 = open elsewhere) |
-| `!teleport <id> [brain] [force]` | Pull any session into this thread. `force` takes over one open in another process |
-| `!recall <text>` | Search past sessions in memory |
-| `!help` / `!agents` / `!models` | Reference |
+| plain text | prompt the agent |
+| `!abort` · `!status` | stop · session info (or elapsed time mid-run) |
+| `!model <name>` · `!agent <name>` | set for the next turn |
+| `!use <kiro\|cline>` · `!end` | switch brain · close the session |
+
+| Anywhere | |
+|---|---|
+| plain top-level message | manager routes it and opens a session |
+| `!new [dir=… model=…] <task>` | start explicitly, skip routing |
+| `!recent [n]` · `!teleport <id>` | list sessions · pull one into this thread |
+| `!recall <text>` | search past sessions from memory |
+
+**It remembers.** Every turn is saved locally, searchable with `!recall` or the cockpit, across terminal and Slack sessions alike.
+
+**Web cockpit** at `http://localhost:1234`: browse, search, start, and continue any session, and control the bridge.
 
 ---
 
 ## Cline
 
-Install the Cline CLI, then set it as default or pick it per session.
-
 ```bash
-npm i -g cline
-cli-controller doctor
+npm i -g cline && cli-controller doctor
 ```
 
-```env
-CLI_CONTROLLER_DEFAULT_BRAIN=cline
-CLINE_BIN=cline
-```
-
-Per session from Slack:
+Make it the default (`CLI_CONTROLLER_DEFAULT_BRAIN=cline`) or pick it per session:
 
 ```text
-!new brain=cline dir=~/projects/myrepo provider=anthropic model=claude-sonnet-4 fix the failing tests
+!new brain=cline dir=~/projects/api provider=anthropic model=claude-sonnet-4 fix the failing tests
 ```
 
-Inside a thread, `!provider <name>` and `!model <name>` apply to the next turn.
+`!provider` and `!model` apply to the next turn.
 
 ---
 
 ## How it runs the agent
 
-The bridge drives Kiro **headlessly** by default: `kiro-cli chat --no-interactive --resume-id <id>`, with the prompt fed on stdin. The process runs one turn and exits. Session continuity comes from `--resume-id` replaying the on-disk transcript, not a live process, so idle threads hold no processes.
-
-An optional **interactive PTY** path (`node-pty`, enabled with `KIRO_PTY_RESUME=1`) exists to rehydrate resumed TUI or subagent sessions that headless resume cannot reconstruct (Kiro#9066). It stays off by default. Full breakdown with a decision diagram: [`plans/rupeshkashyap/cli-controller-npm-publish/pty-headless-modes.md`](plans/rupeshkashyap/cli-controller-npm-publish/pty-headless-modes.md).
+By default the bridge drives Kiro **headless**: one `kiro-cli chat --no-interactive --resume-id` per turn, prompt on stdin, process exits when the turn ends. Continuity comes from the on-disk transcript, so idle threads hold no processes. An optional interactive **PTY** path (`node-pty`, `KIRO_PTY_RESUME=1`) rehydrates TUI/subagent sessions that headless resume can't (Kiro#9066). It stays off by default. Details and a decision diagram: [`plans/rupeshkashyap/cli-controller-npm-publish/pty-headless-modes.md`](plans/rupeshkashyap/cli-controller-npm-publish/pty-headless-modes.md).
 
 ---
 
 ## Security
 
-This is remote code execution on your own machine, by design. The safe defaults matter:
+This is remote code execution on your own machine, on purpose. The defaults keep it safe:
 
-- The wizard sets `SLACK_ALLOWED_USER_IDS` to just you. Never use `*` on a shared workspace.
-- Tool trust is opt-in. `KIRO_TRUST_TOOLS=fs_read` (read-only) is the default. `ALL` grants full autonomy including shell commands, so keep it off a work box.
-- The web cockpit binds to `127.0.0.1`.
-- Your prompts and the agent's output pass through Slack's servers. For work code, confirm this fits your data policy first.
+- Allow-list is **just you**. Never set `SLACK_ALLOWED_USER_IDS=*` on a shared workspace.
+- Tool trust is opt-in. `KIRO_TRUST_TOOLS=fs_read` (read-only) is the default. `ALL` grants shell access, so keep it off a work box.
+- The cockpit binds to `127.0.0.1`.
+- Prompts and output travel through Slack. For work code, confirm your data policy first.
 
-`cli-controller doctor` warns on risky combinations. More in [`SECURITY.md`](SECURITY.md).
+`cli-controller doctor` flags risky combinations. More in [`SECURITY.md`](SECURITY.md).
 
 ---
 
-## Lifecycle
+## Commands & internals
 
 ```bash
 cli-controller start | stop | restart | status | doctor
 cli-controller bridge <cmd>    # Slack bridge only
-cli-controller panel  <cmd>    # web cockpit only (http://localhost:1234)
+cli-controller panel  <cmd>    # web cockpit only
+npm test                       # node:test — core, capture, libs, parsing
 ```
 
-## Architecture
-
-Layered: **Interfaces** (Slack, web) → **Manager / Orchestrator** → **core** (runner, brain registry, memory) → **Brains** (Kiro, Cline). Details in [`plans/architecture/architecture.md`](plans/architecture/architecture.md) and [`plans/architecture/arch_2_sequence.md`](plans/architecture/arch_2_sequence.md).
-
-## Development
-
-```bash
-npm test         # node:test — core, libs, parsing
-```
-
-Adding a brain or an interface: [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## License
+Layered: **Interfaces** (Slack, web) → **Manager** → **core** (runner, brains, memory) → **Brains** (Kiro, Cline). Architecture in [`plans/architecture/architecture.md`](plans/architecture/architecture.md). Adding a brain is one file: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 MIT, see [LICENSE](LICENSE).

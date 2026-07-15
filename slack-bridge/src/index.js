@@ -17,6 +17,7 @@ const store = require('./sessions');
 const { chunk } = require('./chunk');
 const { stripToolTrace, toSlack } = require('./format');
 const attach = require('./attachments');
+const { captureNewSession, withCwdLock, pollForNewSession } = require('./capture');
 
 function rel(d) { if (!d) return '—'; const s = Math.floor((Date.now() - new Date(d)) / 1000); if (s < 60) return s + 's ago'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago'; }
 
@@ -221,31 +222,6 @@ async function unreact(client, channel, ts, name) {
   catch (e) { const err = (e && e.data && e.data.error); if (err && err !== 'no_reaction' && err !== 'message_not_found') console.log('[unreact]', name, err); }
 }
 
-// The session a fresh run created = the id present now but not before.
-// STRICT: only attribute a session when EXACTLY ONE new one appeared in the cwd.
-// If another session is created in the same cwd during the turn window (a second
-// Slack thread, or a terminal kiro-cli in the same dir), more than one "new" id
-// shows up — we then refuse to guess rather than hijack a stranger's session
-// (the root cause of cross-thread contamination). Zero new = turn created none.
-const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-async function captureNewSession(brain, cwd, beforeIds) {
-  const now = await brain.listSessions(cwd);
-  const fresh = now.filter((s) => s && s.sessionId && !beforeIds.has(s.sessionId));
-  if (fresh.length !== 1) {
-    if (fresh.length > 1) {
-      console.warn(`[capture] ${cwd}: ${fresh.length} new sessions appeared during the turn — refusing to guess which is ours (prevents cross-session contamination). Thread will start fresh on next reply.`);
-    }
-    return null;
-  }
-  const id = fresh[0].sessionId;
-  // Guard against a malformed listing yielding a non-id token (produced the stray "the" in state.json).
-  if (!SESSION_ID_RE.test(id)) {
-    console.warn(`[capture] ${cwd}: captured session id is not a UUID (${JSON.stringify(id)}) — ignoring.`);
-    return null;
-  }
-  return id;
-}
-
 // Recent sessions across ALL brains (Kiro + Cline + …), newest first, tagged with brain.
 async function allRecent(n) {
   const lists = await Promise.all(listBrains().map(async (b) => {
@@ -287,10 +263,28 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   progress.set(threadKey, prog);
   const onData = (c) => { prog.buf += c; if (prog.buf.length > 24000) prog.buf = prog.buf.slice(-24000); };
 
-  let res = await brain.runTurn({
+  const turnOpts = {
     cwd: st.cwd, sessionId: st.sessionId, agent: st.agent, model: st.model, provider: st.provider, plan: st.mode === 'plan',
     trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
-  });
+  };
+
+  // Fresh turns: serialize the session-CREATION window per cwd and grab the id as
+  // soon as it appears, so two fresh turns in the same dir can't race into "two new
+  // sessions" and cross/miss their capture. The lock is held only for the brief
+  // creation window (seconds), not the whole (possibly long) turn.
+  let res, capturedSid = null;
+  if (isFresh) {
+    let turnP;
+    await withCwdLock(st.cwd, async () => {
+      const before = new Set((await brain.listSessions(st.cwd)).map((s) => s.sessionId));
+      turnP = brain.runTurn(turnOpts);
+      let settled = false; turnP.then(() => { settled = true; }, () => { settled = true; });
+      capturedSid = await pollForNewSession(brain, st.cwd, before, () => settled);
+    });
+    res = await turnP;
+  } else {
+    res = await brain.runTurn(turnOpts);
+  }
   running.delete(threadKey);
 
   // If this run was aborted, suppress all output — user already got the abort ack.
@@ -302,21 +296,22 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
     return;
   }
 
-  // Resume-failure fallback: stale session id → start fresh once.
+  // Resume-failure fallback: stale session id → start fresh once (serialized capture).
   if (!res.ok && !isFresh && /session|not found|no conversation|resume/i.test(res.error || '')) {
     await say({ thread_ts, text: '↻ Couldn’t resume the previous session — starting a fresh one for this thread.' });
-    const before2 = new Set((await brain.listSessions(st.cwd)).map((s) => s.sessionId));
-    res = await brain.runTurn({
-      cwd: st.cwd, sessionId: null, agent: st.agent, model: st.model, provider: st.provider, plan: st.mode === 'plan',
-      trustTools: TRUST_TOOLS, prompt, timeoutMs: TIMEOUT_MS, onSpawn: (c) => running.set(threadKey, c), onData,
+    let turnP2, sid2 = null;
+    await withCwdLock(st.cwd, async () => {
+      const before2 = new Set((await brain.listSessions(st.cwd)).map((s) => s.sessionId));
+      turnP2 = brain.runTurn({ ...turnOpts, sessionId: null });
+      let settled2 = false; turnP2.then(() => { settled2 = true; }, () => { settled2 = true; });
+      sid2 = await pollForNewSession(brain, st.cwd, before2, () => settled2);
     });
+    res = await turnP2;
     running.delete(threadKey);
-    const sid2 = res.sessionId || await captureNewSession(brain, st.cwd, before2); if (sid2) store.set(threadKey, { sessionId: sid2 });
+    if (sid2) store.set(threadKey, { sessionId: sid2 });
   } else if (isFresh) {
-    // Capture even on failure: a transient CLI backend error may still create the
-    // session (with the user's message), so a retry can resume WITH context
-    // instead of zoning out into a brand-new session.
-    const sid = res.sessionId || await captureNewSession(brain, st.cwd, beforeIds);
+    // Prefer the id captured during the creation window; the brain may also report one.
+    const sid = res.sessionId || capturedSid || await captureNewSession(brain, st.cwd, beforeIds);
     if (sid) store.set(threadKey, { sessionId: sid });
   }
   progress.delete(threadKey);
