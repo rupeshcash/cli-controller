@@ -155,9 +155,9 @@ function helpText(brainId) {
   if (aliasNames.length) lines.push(`• Workspaces: ${aliasNames.map((a) => '`' + a + '`').join(' · ')}`);
   lines.push(
     '',
-    '━━ *Inside a thread: talk to your agent — or your manager* ━━',
+    '━━ *Inside a thread: talk to your agent — or your controller* ━━',
     '• *Bare message* → goes to your *coding agent* (continues the session).',
-    '• `!` + *anything* → talks to your *manager* (me), in plain language:',
+    '• `!` + *anything* → talks to your *controller* (me), in plain language:',
     '   `!use cline` · `!switch to opus` · `!abort this` · `!start over` · `!be quiet`',
     '• Fast commands (instant): `!abort` `!status` `!peek` `!end` `!clear` `!verbose` `!model <n>` `!provider <n>` `!agent <n>` `!plan`/`!act` `!usage`',
     '',
@@ -329,7 +329,7 @@ async function runTurn({ threadKey, thread_ts, reactTs, channel, prompt, say, cl
   }
   console.log(`[turn done] ${threadKey} ok=${res.ok} code=${res.code} outLen=${(res.output || '').length} err=${(res.error || '').slice(0, 120)}`);
 
-  // Manager memory: record this turn + link the Slack thread to the session (best-effort).
+  // Controller memory: record this turn + link the Slack thread to the session (best-effort).
   try {
     const st2 = store.get(threadKey);
     if (st2 && st2.sessionId) {
@@ -379,7 +379,7 @@ function abortThread(threadKey) {
   return true;
 }
 
-// The MANAGER acting on "!<natural language>" inside a live thread: classify the
+// The CONTROLLER acting on "!<natural language>" inside a live thread: classify the
 // intent (fast Kiro call) and take the administrative action. Falls back safely.
 async function applyAdmin(text, { threadKey, rootTs, say }) {
   let d = null;
@@ -471,7 +471,7 @@ async function brokerStart({ text, tkey, rt, channel, say, client }) {
   return startSession({ threadKey: tkey, rootTs: rt, reactTs: rt, channel, patch: {}, prompt: text, say, client });
 }
 
-// Resolve a MANAGER_PENDING thread: user answered the resume-vs-new question.
+// Resolve a CONTROLLER_PENDING thread: user answered the resume-vs-new question.
 async function resolvePending(st, text, { threadKey, rootTs, channel, say, client }) {
   const { candidates, text: origText } = st.pending;
   store.set(threadKey, { pending: undefined });
@@ -557,7 +557,7 @@ async function handleMessage({ message, say, client }) {
   const threadKnown = store.has(threadKey) || (isThreadReply && memoryKnowsThread(threadKey));
   if (isChannel && !mentioned && !(isThreadReply && threadKnown)) return; // ignore unrelated channel chatter
 
-  // ── Attachments: images + text snippets → forwarded to the brain (and, as text, to the manager) ──
+  // ── Attachments: images + text snippets → forwarded to the brain (and, as text, to the controller) ──
   // Image forwarding is gated on the target brain's `images` capability (Kiro: yes, Cline: not yet).
   // For a thread reply the brain is known; for a fresh top-level message it defaults to DEFAULT_BRAIN
   // (the router may re-route, but images are only meaningful for image-capable brains — Kiro is default).
@@ -659,7 +659,7 @@ async function handleMessage({ message, say, client }) {
       }
     }
     const stCur = store.get(threadKey);
-    // MANAGER_PENDING: the manager asked resume-vs-new; this reply is the answer.
+    // CONTROLLER_PENDING: the controller asked resume-vs-new; this reply is the answer.
     if (stCur.pending && !text.startsWith('!')) return resolvePending(stCur, text, { threadKey, rootTs, channel, say, client });
     if (text.startsWith('!')) {
       const [cmd, ...rest] = text.slice(1).split(/\s+/);
@@ -742,7 +742,7 @@ async function handleMessage({ message, say, client }) {
           return say({ thread_ts: rootTs, text: `*Last turn* · ${usageLine(cur.lastUsage, cur.lastModel)}` });
         }
         default:
-          // Not a fast command → the MANAGER interprets it as natural-language admin.
+          // Not a fast command → the CONTROLLER interprets it as natural-language admin.
           return applyAdmin(text, { threadKey, rootTs, say });
       }
     }
@@ -755,7 +755,7 @@ async function handleMessage({ message, say, client }) {
     return startSession({ threadKey, rootTs: message.ts, reactTs: message.ts, channel, patch, prompt, say, client });
   }
   if (text.startsWith('!')) {
-    return say({ thread_ts: message.ts, text: 'At the top level, just *type your task* to start — the manager routes it.\nInside a thread, `!<anything>` talks to me (your *manager*): `!abort`, `!use cline`, `!switch to opus`, `!recent`… · `!help`' });
+    return say({ thread_ts: message.ts, text: 'At the top level, just *type your task* to start — the controller routes it.\nInside a thread, `!<anything>` talks to me (your *controller*): `!abort`, `!use cline`, `!switch to opus`, `!recent`… · `!help`' });
   }
   // Plain natural-language top-level message → maybe offer resume, else route + start.
   const rt = message.ts;

@@ -1,4 +1,4 @@
-// core/memory/json-store.js — the manager's ever-persistent memory.
+// core/memory/json-store.js — the controller's ever-persistent memory.
 // Append-only JSONL event log (source of truth) replayed into an in-memory index.
 // Zero dependencies, cross-platform, loss-resistant. Search = metadata+text ranking
 // (fast at personal scale). Records are never deleted; ending a session only marks it closed.

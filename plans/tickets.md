@@ -41,7 +41,7 @@ is already brain-agnostic; this ticket only tracks the Cline-specific safety gap
 **Status:** Done (2026-07-14, branch `feat/cline-support-main`).
 
 A Slack user can attach an **image** or a **text snippet** in a DM/thread; the bridge downloads it
-and forwards it to the brain (and, as text, to the manager/router).
+and forwards it to the brain (and, as text, to the controller/router).
 
 - Image input is **gated on the brain's `images` capability** (`core/brain/*.js`): Kiro `true`, Cline `false`.
 - Mechanism: neither CLI takes an image argument, so the file is downloaded to a temp dir and its

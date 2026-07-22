@@ -79,13 +79,13 @@ async function route(userText, ctx, model) {
   };
 }
 
-// ── Manager admin-intent classifier ─────────────────────────────────────────
-// When a user addresses the MANAGER with "!<natural language>" (not a known fast
-// command), classify it into one administrative action. This is the manager
+// ── Controller admin-intent classifier ─────────────────────────────────────────
+// When a user addresses the CONTROLLER with "!<natural language>" (not a known fast
+// command), classify it into one administrative action. This is the controller
 // "snatching control" of a thread — NOT a task for the coding agent.
 function buildAdminPrompt(userText, ctx) {
   return [
-    'You are the MANAGER of a Slack↔coding-agent bridge. The user addressed YOU (prefix "!") to take an ADMINISTRATIVE action on their session — NOT to give the coding agent a task.',
+    'You are the CONTROLLER of a Slack↔coding-agent bridge. The user addressed YOU (prefix "!") to take an ADMINISTRATIVE action on their session — NOT to give the coding agent a task.',
     'Respond with ONLY one minified JSON object, no prose, no code fences.',
     'Shape: {"action": string, "value": string|null, "note": string}',
     'action ∈ (pick the single best fit):',
