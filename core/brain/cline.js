@@ -110,7 +110,8 @@ function isInstalled() {
   return !(r.error || r.status !== 0);
 }
 
-const capabilities = { resume: true, agents: false, models: true, planMode: true, sessionStore: true, singleWriterLock: false, incrementalOutput: true };
+// TODO(cline-images): revisit — the `cline` CLI has no image-input flag and its read tool is text-only, so images can't be forwarded yet. See plans/tickets.md. Flip to true once the CLI exposes image attachments.
+const capabilities = { resume: true, agents: false, models: true, images: false, planMode: true, sessionStore: true, singleWriterLock: false, incrementalOutput: true };
 
 const adapter = {
   id: 'cline',

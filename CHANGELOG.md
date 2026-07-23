@@ -5,6 +5,7 @@ All notable changes to this project. Format loosely follows Keep a Changelog; ve
 ## [Unreleased]
 
 ### Added
+- **Terminal-resume command surfacing** — when a Slack session starts, the bridge posts a copyable command to resume that exact session in your terminal; also shown in `!status`. Built from each brain's own `buildResumeCommand` (brain-agnostic; Kiro includes `--agent`). The command only exists after the first turn creates the session id, so it posts then (open-session messages point at `!status`). Tracked Cline concurrency gap in `plans/tickets.md` (CLI-TELE-1).
 - **`cli-controller` binary** — cross-platform front door (setup / start / stop / restart / status / doctor, plus per-service `bridge`/`panel` control) with pure-Node process lifecycle (no bash, works on Windows/macOS/Linux).
 - **Natural-language onboarding wizard** (`cli-controller setup`) — detects the AI brain, walks through Slack tokens, validates via `auth.test`, sets the allow-list to just you, starts the services, and hands off to chat-driven onboarding.
 - **Manager memory** (`core/memory`) — ever-persistent, cross-session, searchable store (append-only JSONL, zero deps, cross-process). Captured on every turn; surfaced via Slack `!recall` and web `/api/memory/{search,recent}`. Backend-swappable (ai-memory pluggable later).
@@ -16,6 +17,9 @@ All notable changes to this project. Format loosely follows Keep a Changelog; ve
 
 ### Security
 - Safe defaults: self-only allow-list, opt-in tool trust, `127.0.0.1`-only cockpit, secrets in a 0600 `.env`, stdin-fed prompts, no-shell spawns. See `SECURITY.md`.
+
+### Fixed
+- **Threads no longer forget their session** ("This thread has no session"). Two causes fixed: (1) `state.json` was written non-atomically and, on a parse error at boot, silently reset to `{}` — a crash/restart mid-write wiped *every* thread at once. Writes are now atomic (temp file + `rename`) with a `.bak` snapshot, and load falls back to the backup instead of discarding non-empty state. (2) A thread that lost its session dead-ended the user. The bridge now recovers the session from the durable append-only memory log (`threadKey → session`, which survives a `state.json` wipe); if the thread is genuinely unknown it continues as a fresh session in the same thread instead of telling the user to start over. Memory now also records the session's `agent` so recovery resumes with the right agent. Covered by `slack-bridge/test/sessions.test.js`.
 
 ## [0.1.1]
 

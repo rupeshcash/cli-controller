@@ -170,7 +170,9 @@ function isInstalled() {
 }
 
 // ── Brain adapter (contract: see plans/roadmap/01-brain-multi-cli.md §3) ──
-const capabilities = { resume: true, agents: true, models: true, sessionStore: true, singleWriterLock: true, incrementalOutput: false };
+// images:true → Kiro reads image files by path via its fs_read Image mode; works headless with the
+// default --trust-tools=fs_read (verified 2026-07-14: headless kiro-cli read a PNG and named its color).
+const capabilities = { resume: true, agents: true, models: true, images: true, sessionStore: true, singleWriterLock: true, incrementalOutput: false };
 
 const adapter = {
   id: 'kiro',
