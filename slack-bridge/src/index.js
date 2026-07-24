@@ -17,6 +17,7 @@ const store = require('./sessions');
 const { chunk } = require('./chunk');
 const { stripToolTrace, toSlack } = require('./format');
 const attach = require('./attachments');
+const outfile = require('./outfile');
 
 function rel(d) { if (!d) return '—'; const s = Math.floor((Date.now() - new Date(d)) / 1000); if (s < 60) return s + 's ago'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago'; }
 
@@ -159,7 +160,7 @@ function helpText(brainId) {
     '• *Bare message* → goes to your *coding agent* (continues the session).',
     '• `!` + *anything* → talks to your *controller* (me), in plain language:',
     '   `!use cline` · `!switch to opus` · `!abort this` · `!start over` · `!be quiet`',
-    '• Fast commands (instant): `!abort` `!status` `!peek` `!end` `!clear` `!verbose` `!model <n>` `!provider <n>` `!agent <n>` `!plan`/`!act` `!usage`',
+    '• Fast commands (instant): `!abort` `!status` `!peek` `!end` `!clear` `!verbose` `!model <n>` `!provider <n>` `!agent <n>` `!plan`/`!act` `!usage` `!file <path>`',
     '',
     '━━ *Find & resume any session* ━━',
     '• `!recent [n]` — recent sessions (terminal *and* Slack)  ·  `!teleport <id>` — pull one into a thread',
@@ -740,6 +741,27 @@ async function handleMessage({ message, say, client }) {
           const cur = store.get(threadKey) || {};
           if (!cur.lastUsage) return say({ thread_ts: rootTs, text: 'No usage recorded yet — run a turn first. (Some brains don’t report usage.)' });
           return say({ thread_ts: rootTs, text: `*Last turn* · ${usageLine(cur.lastUsage, cur.lastModel)}` });
+        }
+        case 'file':
+        case 'cat':
+        case 'get': {
+          if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!file <path>` — sends a file from this session\'s workspace here (e.g. `!file src/foo.py`).' });
+          const cwd = (store.get(threadKey) || {}).cwd || DEFAULT_CWD;
+          const res = await outfile.deliverWorkspaceFile({
+            cwd,
+            relPath: arg,
+            // Inject the Slack transport; outfile.js stays free of any Slack dependency.
+            upload: ({ filename, buf, size }) => client.files.uploadV2({
+              channel_id: channel,
+              thread_ts: rootTs,
+              filename,
+              title: filename,
+              initial_comment: `📄 \`${arg}\` (${size.toLocaleString()} bytes) from \`${path.basename(cwd)}\`:`,
+              file: buf,
+            }),
+          });
+          if (!res.ok) return say({ thread_ts: rootTs, text: `⚠️ ${res.error}` });
+          return;
         }
         default:
           // Not a fast command → the CONTROLLER interprets it as natural-language admin.
