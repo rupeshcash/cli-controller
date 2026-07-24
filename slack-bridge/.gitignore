@@ -1,5 +1,9 @@
 node_modules/
+# secrets — all .env variants except the example
 .env
+.env.*
+!.env.example
 state.json
 *.log
+*.pid
 macos-ca.pem

@@ -11,6 +11,7 @@ const brains = require('../core/brain');
 const ok = (m) => console.log('   ✓ ' + m);
 const warn = (m) => console.warn('   ⚠ ' + m);
 const bad = (m) => console.error('   ✗ ' + m);
+const note = (m) => console.log('   · ' + m);
 let errors = 0, warns = 0;
 const mark = (c) => { if (c.level === 'error') { errors++; bad(c.msg); } else if (c.level === 'warn') { warns++; warn(c.msg); } else ok(c.msg); };
 
