@@ -39,9 +39,15 @@ async function downloadOne(f, token) {
   if (!url) return { error: `no download URL for "${f.name || f.id}"` };
   if (f.size && f.size > MAX_BYTES) return { error: `"${f.name || f.id}" is ${(f.size / 1048576).toFixed(1)}MB — over the ${Math.round(MAX_BYTES / 1048576)}MB limit` };
   let resp;
-  try { resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } }); }
-  catch (e) { return { error: `download failed for "${f.name || f.id}": ${e.message}` }; }
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), parseInt(process.env.KIRO_ATTACH_TIMEOUT_MS, 10) || 30000);
+  try { resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: ac.signal }); }
+  catch (e) { return { error: `download failed for "${f.name || f.id}": ${e.name === 'AbortError' ? 'timed out' : e.message}` }; }
+  finally { clearTimeout(to); }
   if (!resp || !resp.ok) return { error: `download failed for "${f.name || f.id}": HTTP ${resp && resp.status}` };
+  // Reject an oversized body via content-length before materializing it.
+  const clen = parseInt(resp.headers && resp.headers.get && resp.headers.get('content-length'), 10);
+  if (Number.isFinite(clen) && clen > MAX_BYTES) return { error: `"${f.name || f.id}" is ${(clen / 1048576).toFixed(1)}MB — over the ${Math.round(MAX_BYTES / 1048576)}MB limit` };
   const buf = Buffer.from(await resp.arrayBuffer());
   if (buf.length > MAX_BYTES) return { error: `"${f.name || f.id}" exceeds the ${Math.round(MAX_BYTES / 1048576)}MB limit` };
   const kind = classify(f);

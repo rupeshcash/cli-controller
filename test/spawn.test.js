@@ -33,3 +33,13 @@ test('spawnCli passes args through intact (prompt survives)', async () => {
   await new Promise((r) => p.on('close', r));
   assert.equal(out, 'hey there world');
 });
+
+test('spawnCli falls back to homedir when cwd does not exist (stale/relocated session dir)', async () => {
+  // PREVENTS: a stale session cwd crashing the spawn with a misleading ENOENT.
+  const missing = path.join(os.tmpdir(), 'spawn-nope-' + Date.now(), 'deep', 'gone');
+  const p = spawnCli(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], { cwd: missing });
+  let out = '';
+  p.stdout.on('data', (d) => { out += d.toString(); });
+  await new Promise((r) => p.on('close', r));
+  assert.equal(fs.realpathSync(out), fs.realpathSync(os.homedir()));
+});

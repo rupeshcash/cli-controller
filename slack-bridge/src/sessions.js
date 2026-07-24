@@ -29,7 +29,13 @@ function createStore(file) {
         state = JSON.parse(raw);
         if (f !== file) {
           console.warn(`[sessions] primary state was unreadable — recovered ${Object.keys(state).length} thread(s) from ${path.basename(f)}`);
-          try { fs.writeFileSync(file, raw); } catch (_) { /* best effort */ }
+          // Atomic repair: temp-write then rename, so a crash mid-repair can't leave
+          // the primary truncated (which would defeat the recovery we just did).
+          try {
+            const repairTmp = `${file}.tmp`;
+            fs.writeFileSync(repairTmp, raw);
+            fs.renameSync(repairTmp, file);
+          } catch (_) { /* best effort — .bak still holds the good copy */ }
         }
         return;
       } catch (e) {
@@ -44,8 +50,12 @@ function createStore(file) {
     try { data = JSON.stringify(state, null, 2); } catch (e) { console.warn(`[sessions] serialize failed: ${e.message}`); return; }
     const tmp = `${file}.tmp`;
     try {
-      // Snapshot the current good file as .bak BEFORE swapping in the new one.
-      try { fs.copyFileSync(file, `${file}.bak`); } catch (_) { /* no prior file yet */ }
+      // Refresh .bak ONLY from a primary we can prove is valid JSON — never let a
+      // corrupt-but-not-yet-repaired primary clobber the last-known-good backup.
+      try {
+        JSON.parse(fs.readFileSync(file, 'utf8'));
+        fs.copyFileSync(file, `${file}.bak`);
+      } catch (_) { /* no prior file yet, or it's still corrupt — keep the existing .bak */ }
       fs.writeFileSync(tmp, data);   // fully write to temp first
       fs.renameSync(tmp, file);      // atomic swap — readers never see a partial file
     } catch (e) {
