@@ -1,14 +1,23 @@
-// src/outfile.js — outbound file delivery: pull a file from the session's workspace into a Slack thread.
+// src/outfile.js — Slack-AGNOSTIC workspace-file egress toolkit.
 //
-// Powers the `!file <path>` controller command. The agent works in a session `cwd` (tracked per thread in
-// state.json); this lets you say "send me that file here" and get it as a native, syntax-highlighted Slack
-// upload (Slack derives highlighting from the filename extension).
+// One cohesive responsibility: safely turn a natural request into deliverable file bytes.
+//   find  → findWorkspaceFiles / parseFetchQuery   (locate by name/qualifier under cwd)
+//   guard → isBlockedSecret / resolvePath          (secret refusal + cwd confinement)
+//   read  → readForUpload                          (stat + size cap + read)
+//   deliver → deliverWorkspaceFile                 (drives an INJECTED uploader)
 //
-// SECURITY: this reads arbitrary bytes off the user's disk and pushes them to Slack. Two guards, both pure
-// and unit-tested:
-//   1. resolvePath() confines the target to the session cwd — no `..` traversal, no absolute path escaping cwd.
-//   2. isBlockedSecret() refuses obvious secret files (.env, keys, credentials) so a stray `!file .env` can't
-//      leak them. It's the user's own allow-listed account, but the guard prevents a careless one-liner.
+// INTEGRATION BOUNDARY: this module has NO Slack dependency. The transport (Slack
+// files.uploadV2) is injected by the caller — `slack-bridge/src/index.js`
+// (`sendWorkspaceFileToThread`) is the only place that knows about Slack. That keeps
+// discovery/guards/read fully unit-testable and reusable by any interface (web UI, etc.).
+//
+// Powers `!file <path>` (exact) and the controller's `!<nl> fetch` action (fuzzy). The agent
+// works in a session `cwd` (tracked per thread in state.json).
+//
+// SECURITY: this reads arbitrary bytes off the user's disk. Two guards, both pure and unit-tested:
+//   1. resolvePath() confines the target to the session cwd — no `..` traversal, no absolute escape.
+//   2. isBlockedSecret() refuses obvious secret files (.env, keys, credentials) so neither an exact
+//      `!file .env` nor a fuzzy fetch can surface them.
 const fs = require('fs');
 const path = require('path');
 

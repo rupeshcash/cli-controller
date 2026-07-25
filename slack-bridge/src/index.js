@@ -382,6 +382,12 @@ function abortThread(threadKey) {
 
 // The CONTROLLER acting on "!<natural language>" inside a live thread: classify the
 // intent (fast Kiro call) and take the administrative action. Falls back safely.
+// ── Slack-coupling boundary for workspace files ────────────────────────────────
+// These two functions are the ONLY Slack-aware file code. Everything else (find,
+// guard, read, deliver-decision) lives in `src/outfile.js`, which has no Slack
+// dependency. Keep it that way: new file logic goes in outfile.js; only the
+// Slack transport + user-facing messages belong here.
+
 // Deliver one workspace file into a thread as a native Slack upload. Shared by the
 // `!file` fast command and the controller's natural-language `fetch` action.
 async function sendWorkspaceFileToThread({ client, channel, thread_ts, cwd, relPath, say }) {
@@ -400,6 +406,22 @@ async function sendWorkspaceFileToThread({ client, channel, thread_ts, cwd, relP
   });
   if (!res.ok) await say({ thread_ts, text: `⚠️ ${res.error}` });
   return res;
+}
+
+// Controller `fetch` action: locate a file by natural-language query under the session
+// workspace and deliver it. 0 matches → say so; 1 → send it; N → list candidates.
+// Pure discovery lives in outfile.findWorkspaceFiles; this function is only the UX policy.
+async function handleFetchAction({ query, cwd, thread_ts, channel, client, say, note = '' }) {
+  const matches = outfile.findWorkspaceFiles(cwd, query);
+  if (!matches.length) {
+    return say({ thread_ts, text: `🔎 Couldn't find a file matching "${query}" under \`${path.basename(cwd)}\`. Try \`!file <exact/path>\`.` });
+  }
+  if (matches.length === 1) {
+    await say({ thread_ts, text: `🔎 Found \`${matches[0]}\` — sending…${note}` });
+    return sendWorkspaceFileToThread({ client, channel, thread_ts, cwd, relPath: matches[0], say });
+  }
+  const body = matches.slice(0, 10).map((m, i) => `*${i + 1}.* \`${m}\``).join('\n');
+  return say({ thread_ts, text: `🔎 Found ${matches.length} matches for "${query}" — grab one with \`!file <path>\`:\n${body}` });
 }
 
 async function applyAdmin(text, { threadKey, rootTs, say, client, channel }) {
@@ -461,16 +483,8 @@ async function applyAdmin(text, { threadKey, rootTs, say, client, channel }) {
       return say({ thread_ts: rootTs, text: d.value ? `To resume that session, send \`!teleport ${d.value}\` as a *top-level* message.` : 'Which session id? See `!recent`.' });
     case 'fetch': {
       const cwd = (store.get(threadKey) || {}).cwd || DEFAULT_CWD;
-      const q = d.value || text.replace(/^!\s*/, '');
-      const matches = outfile.findWorkspaceFiles(cwd, q);
-      if (!matches.length) return say({ thread_ts: rootTs, text: `🔎 Couldn't find a file matching "${q}" under \`${path.basename(cwd)}\`. Try \`!file <exact/path>\`.` });
-      if (matches.length === 1) {
-        await say({ thread_ts: rootTs, text: `🔎 Found \`${matches[0]}\` — sending…${note}` });
-        await sendWorkspaceFileToThread({ client, channel, thread_ts: rootTs, cwd, relPath: matches[0], say });
-        return;
-      }
-      const body = matches.slice(0, 10).map((m, i) => `*${i + 1}.* \`${m}\``).join('\n');
-      return say({ thread_ts: rootTs, text: `🔎 Found ${matches.length} matches for "${q}" — grab one with \`!file <path>\`:\n${body}` });
+      const query = d.value || text.replace(/^!\s*/, '');
+      return handleFetchAction({ query, cwd, thread_ts: rootTs, channel, client, say, note });
     }
     case 'help':
       return say({ thread_ts: rootTs, text: helpText() });
