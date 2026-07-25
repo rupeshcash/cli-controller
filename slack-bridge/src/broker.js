@@ -100,6 +100,7 @@ function buildAdminPrompt(userText, ctx) {
     '  "recall"   search PAST sessions/decisions from memory; value=the search query',
     '  "recent"   list recent sessions; value=count or null',
     '  "teleport" resume a specific session; value=sessionId',
+    '  "fetch"    find & deliver a FILE from the session workspace into the thread; value=the file name/description to look for (e.g. "design.md for ticket ENG-42"). Use this when the user asks to fetch/get/send/show a file, especially when they don\'t give an exact path.',
     '  "help"     show help',
     '  "none"     not an admin action we support yet; put a short reason in note',
     `Available agents: ${ctx.agentsRaw || '(main, default)'}`,

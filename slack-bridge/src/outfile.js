@@ -69,6 +69,66 @@ function errText(e) {
   return (e && e.data && e.data.error) || (e && e.message) || 'unknown error';
 }
 
+// ── Natural-language file discovery (powers the controller's `fetch` action) ──
+// Directories we never descend into (heavy / irrelevant), plus all dotdirs.
+const IGNORE_DIRS = new Set(['node_modules', 'dist', 'build', 'out', '.cache', 'target', 'vendor', 'coverage', '.next', '.venv', '__pycache__']);
+// Words to drop from a natural-language request so only the filename + qualifiers remain.
+const STOP_WORDS = new Set(['the', 'me', 'for', 'from', 'please', 'can', 'you', 'fetch', 'get', 'file',
+  'find', 'send', 'show', 'it', 'is', 'somewhere', 'in', 'project', 'my', 'of', 'give', 'pull', 'grab',
+  'that', 'this', 'and', 'to', 'a', 'an', 'want', 'need', 'the', 'doc', 'document', 'please']);
+
+// Parse a request like "the design.md for ticket ENG-42" → { name:'design.md', qualifiers:['eng-42'] }.
+function parseFetchQuery(query) {
+  const tokens = (String(query || '').toLowerCase().match(/[a-z0-9][\w.\-/]*/g) || []);
+  const name = tokens.find((t) => /^[\w-]+\.[\w-]+$/.test(t)) || null; // a filename with an extension
+  const qualifiers = tokens.filter((t) => t !== name && t.length >= 2 && !STOP_WORDS.has(t));
+  return { name, qualifiers };
+}
+
+// Search `cwd` for files matching a natural-language `query`. Returns ranked relative paths.
+// Bounded (maxEntries) and safe: skips ignored/hidden dirs and secret files, never escapes cwd.
+function findWorkspaceFiles(cwd, query, { limit = 10, maxEntries = 20000 } = {}) {
+  const base = path.resolve(cwd || process.cwd());
+  const { name, qualifiers } = parseFetchQuery(query);
+  if (!name && qualifiers.length === 0) return [];
+  const results = [];
+  let seen = 0;
+  const stack = [base];
+  while (stack.length && seen < maxEntries) {
+    const dir = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (++seen > maxEntries) break;
+      if (e.isDirectory()) {
+        if (e.name.startsWith('.') || IGNORE_DIRS.has(e.name)) continue;
+        stack.push(path.join(dir, e.name));
+        continue;
+      }
+      if (!e.isFile()) continue;
+      const bn = e.name.toLowerCase();
+      const rel = path.relative(base, path.join(dir, e.name));
+      if (isBlockedSecret(rel)) continue;
+      let score = 0;
+      if (name) {
+        if (bn === name) score += 100;
+        else if (bn.includes(name)) score += 40;
+        else continue; // a filename was named but this basename doesn't match → skip
+      } else {
+        // No filename token: require a qualifier to hit the basename.
+        const hits = qualifiers.filter((q) => bn.includes(q)).length;
+        if (!hits) continue;
+        score += hits * 20;
+      }
+      const relLower = rel.toLowerCase();
+      for (const q of qualifiers) if (relLower.includes(q)) score += 10; // path context (e.g. ticket id folder)
+      results.push({ rel, score });
+    }
+  }
+  results.sort((a, b) => b.score - a.score || a.rel.length - b.rel.length);
+  return results.slice(0, limit).map((r) => r.rel);
+}
+
 // Orchestrate delivery of one workspace file through an INJECTED `upload` function.
 // `upload({ filename, buf, size })` is expected to be async and perform the actual transport
 // (in the bridge: a Slack files.uploadV2 call). Kept transport-agnostic so this is unit-testable
@@ -85,4 +145,4 @@ async function deliverWorkspaceFile({ cwd, relPath, upload, maxBytes = FILE_MAX_
   }
 }
 
-module.exports = { isBlockedSecret, resolvePath, readForUpload, deliverWorkspaceFile, errText, FILE_MAX_BYTES, SECRET_PATTERNS, SECRET_SEGMENTS };
+module.exports = { isBlockedSecret, resolvePath, readForUpload, deliverWorkspaceFile, findWorkspaceFiles, parseFetchQuery, errText, FILE_MAX_BYTES, SECRET_PATTERNS, SECRET_SEGMENTS };

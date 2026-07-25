@@ -159,7 +159,7 @@ function helpText(brainId) {
     '━━ *Inside a thread: talk to your agent — or your controller* ━━',
     '• *Bare message* → goes to your *coding agent* (continues the session).',
     '• `!` + *anything* → talks to your *controller* (me), in plain language:',
-    '   `!use cline` · `!switch to opus` · `!abort this` · `!start over` · `!be quiet`',
+    '   `!use cline` · `!switch to opus` · `!abort this` · `!start over` · `!be quiet` · `!fetch me the design.md for ENG-42`',
     '• Fast commands (instant): `!abort` `!status` `!peek` `!end` `!clear` `!verbose` `!model <n>` `!provider <n>` `!agent <n>` `!plan`/`!act` `!usage` `!file <path>`',
     '',
     '━━ *Find & resume any session* ━━',
@@ -382,7 +382,27 @@ function abortThread(threadKey) {
 
 // The CONTROLLER acting on "!<natural language>" inside a live thread: classify the
 // intent (fast Kiro call) and take the administrative action. Falls back safely.
-async function applyAdmin(text, { threadKey, rootTs, say }) {
+// Deliver one workspace file into a thread as a native Slack upload. Shared by the
+// `!file` fast command and the controller's natural-language `fetch` action.
+async function sendWorkspaceFileToThread({ client, channel, thread_ts, cwd, relPath, say }) {
+  const res = await outfile.deliverWorkspaceFile({
+    cwd,
+    relPath,
+    // Inject the Slack transport; outfile.js stays free of any Slack dependency.
+    upload: ({ filename, buf, size }) => client.files.uploadV2({
+      channel_id: channel,
+      thread_ts,
+      filename,
+      title: filename,
+      initial_comment: `📄 \`${relPath}\` (${size.toLocaleString()} bytes) from \`${path.basename(cwd)}\`:`,
+      file: buf,
+    }),
+  });
+  if (!res.ok) await say({ thread_ts, text: `⚠️ ${res.error}` });
+  return res;
+}
+
+async function applyAdmin(text, { threadKey, rootTs, say, client, channel }) {
   let d = null;
   try { d = await routeAdmin(text.replace(/^!\s*/, ''), brokerCtx(), BROKER_MODEL); }
   catch (e) { console.log('[admin broker error]', e.message); }
@@ -439,6 +459,19 @@ async function applyAdmin(text, { threadKey, rootTs, say }) {
     }
     case 'teleport':
       return say({ thread_ts: rootTs, text: d.value ? `To resume that session, send \`!teleport ${d.value}\` as a *top-level* message.` : 'Which session id? See `!recent`.' });
+    case 'fetch': {
+      const cwd = (store.get(threadKey) || {}).cwd || DEFAULT_CWD;
+      const q = d.value || text.replace(/^!\s*/, '');
+      const matches = outfile.findWorkspaceFiles(cwd, q);
+      if (!matches.length) return say({ thread_ts: rootTs, text: `🔎 Couldn't find a file matching "${q}" under \`${path.basename(cwd)}\`. Try \`!file <exact/path>\`.` });
+      if (matches.length === 1) {
+        await say({ thread_ts: rootTs, text: `🔎 Found \`${matches[0]}\` — sending…${note}` });
+        await sendWorkspaceFileToThread({ client, channel, thread_ts: rootTs, cwd, relPath: matches[0], say });
+        return;
+      }
+      const body = matches.slice(0, 10).map((m, i) => `*${i + 1}.* \`${m}\``).join('\n');
+      return say({ thread_ts: rootTs, text: `🔎 Found ${matches.length} matches for "${q}" — grab one with \`!file <path>\`:\n${body}` });
+    }
     case 'help':
       return say({ thread_ts: rootTs, text: helpText() });
     default:
@@ -747,25 +780,12 @@ async function handleMessage({ message, say, client }) {
         case 'get': {
           if (!arg) return say({ thread_ts: rootTs, text: 'Usage: `!file <path>` — sends a file from this session\'s workspace here (e.g. `!file src/foo.py`).' });
           const cwd = (store.get(threadKey) || {}).cwd || DEFAULT_CWD;
-          const res = await outfile.deliverWorkspaceFile({
-            cwd,
-            relPath: arg,
-            // Inject the Slack transport; outfile.js stays free of any Slack dependency.
-            upload: ({ filename, buf, size }) => client.files.uploadV2({
-              channel_id: channel,
-              thread_ts: rootTs,
-              filename,
-              title: filename,
-              initial_comment: `📄 \`${arg}\` (${size.toLocaleString()} bytes) from \`${path.basename(cwd)}\`:`,
-              file: buf,
-            }),
-          });
-          if (!res.ok) return say({ thread_ts: rootTs, text: `⚠️ ${res.error}` });
+          await sendWorkspaceFileToThread({ client, channel, thread_ts: rootTs, cwd, relPath: arg, say });
           return;
         }
         default:
           // Not a fast command → the CONTROLLER interprets it as natural-language admin.
-          return applyAdmin(text, { threadKey, rootTs, say });
+          return applyAdmin(text, { threadKey, rootTs, say, client, channel });
       }
     }
     return runTurn({ threadKey, thread_ts: rootTs, reactTs: message.ts, channel, prompt: text, say, client });

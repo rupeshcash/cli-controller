@@ -109,3 +109,49 @@ test('errText: prefers Slack Web API error, falls back to message', () => {
   assert.equal(errText(new Error('boom')), 'boom');
   assert.equal(errText(null), 'unknown error');
 });
+
+// ── Natural-language file discovery (findWorkspaceFiles / parseFetchQuery) ─────
+const { findWorkspaceFiles, parseFetchQuery } = require('../src/outfile');
+
+test('parseFetchQuery: pulls the filename token and drops filler words', () => {
+  const r = parseFetchQuery('can you fetch me the design.md for ticket ENG-42 please');
+  assert.equal(r.name, 'design.md');
+  assert.ok(r.qualifiers.includes('eng-42'));
+  assert.ok(!r.qualifiers.includes('fetch') && !r.qualifiers.includes('the'));
+});
+
+function makeTree() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'find-'));
+  fs.mkdirSync(path.join(dir, 'plans', 'eng-42'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'plans', 'eng-99'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'node_modules', 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'plans', 'eng-42', 'design.md'), '# 42');
+  fs.writeFileSync(path.join(dir, 'plans', 'eng-99', 'design.md'), '# 99');
+  fs.writeFileSync(path.join(dir, 'README.md'), 'readme');
+  fs.writeFileSync(path.join(dir, '.env'), 'SECRET=1');
+  fs.writeFileSync(path.join(dir, 'node_modules', 'pkg', 'design.md'), 'noise'); // must be ignored
+  return dir;
+}
+
+test('findWorkspaceFiles: ranks the ticket-qualified match first, ignores node_modules', () => {
+  const dir = makeTree();
+  const hits = findWorkspaceFiles(dir, 'design.md for eng-42');
+  assert.equal(hits[0], path.join('plans', 'eng-42', 'design.md')); // qualifier boosts the eng-42 copy
+  assert.ok(hits.includes(path.join('plans', 'eng-99', 'design.md')));
+  assert.ok(!hits.some((h) => h.includes('node_modules')), 'node_modules must be skipped');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('findWorkspaceFiles: matches by qualifier when no filename given', () => {
+  const dir = makeTree();
+  assert.ok(findWorkspaceFiles(dir, 'readme').includes('README.md'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('findWorkspaceFiles: never surfaces secret files, and empty query → no results', () => {
+  // PREVENTS: a fuzzy fetch leaking .env into Slack, or a bare request scanning everything.
+  const dir = makeTree();
+  assert.deepEqual(findWorkspaceFiles(dir, '.env'), []);
+  assert.deepEqual(findWorkspaceFiles(dir, ''), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
