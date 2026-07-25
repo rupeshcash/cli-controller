@@ -83,6 +83,17 @@ test('parseJsonl: ignores non-JSON noise lines without throwing', () => {
   assert.equal(r.text, 'ok');
 });
 
+test('parseJsonl: extracts model + usage from run_result for the per-turn footer', () => {
+  // PREVENTS: the !usage footer / lastModel silently going blank for Cline turns.
+  const withModelOnly = parseJsonl(REAL_SUCCESS);
+  assert.equal(withModelOnly.model, 'gpt-5.5');
+  assert.equal(withModelOnly.usage, null); // this stream reports no token usage
+
+  const withUsage = parseJsonl('{"type":"run_result","finishReason":"completed","text":"hi","model":"claude","aggregateUsage":{"inputTokens":120,"outputTokens":45,"totalCost":0.0031}}');
+  assert.equal(withUsage.model, 'claude');
+  assert.deepEqual(withUsage.usage, { input: 120, output: 45, cost: 0.0031 });
+});
+
 // ── parseErrorStream ────────────────────────────────────────────────────────
 test('parseErrorStream: extracts message from a JSON error event on stderr', () => {
   // PREVENTS: losing the real reason when cline writes the error to stderr (observed on Windows).
@@ -124,25 +135,29 @@ test('normalizeHistory: drops entries without a sessionId; tolerates junk', () =
 
 // ── findClineEntry (pure, injected PATH + exists) ──────────────────────────────
 test('findClineEntry: returns the JS entry beside the npm shim on PATH', () => {
-  const shimDir = 'C:\\Users\\me\\AppData\\Roaming\\npm';
+  // OS-portable: build dirs with path.sep and join PATH with path.delimiter so the
+  // test exercises the same logic on Windows, macOS, and Linux (no hardcoded C:\ / ;).
+  const shimDir = path.join(path.sep, 'usr', 'lib', 'npm');
   const entry = path.join(shimDir, 'node_modules', 'cline', 'bin', 'cline');
   const present = new Set([path.join(shimDir, 'cline.cmd'), entry]);
   const exists = (p) => present.has(p);
-  assert.equal(findClineEntry(`C:\\Windows;${shimDir}`, exists), entry);
+  const PATHENV = [path.join(path.sep, 'bin'), shimDir].join(path.delimiter);
+  assert.equal(findClineEntry(PATHENV, exists), entry);
 });
 
 test('findClineEntry: returns null when shim present but entry missing, or nothing on PATH', () => {
-  const shimDir = 'C:\\npm';
+  const shimDir = path.join(path.sep, 'opt', 'npm');
   const onlyShim = (p) => p === path.join(shimDir, 'cline.cmd');
   assert.equal(findClineEntry(shimDir, onlyShim), null);
-  assert.equal(findClineEntry('C:\\Windows;C:\\other', () => false), null);
+  assert.equal(findClineEntry([path.join(path.sep, 'bin'), path.join(path.sep, 'other')].join(path.delimiter), () => false), null);
   assert.equal(findClineEntry('', () => true), null);
 });
 
 // ── resolveExec (pure, injected platform/env/exists) ───────────────────────────
 test('resolveExec: Windows with entry found → node-direct, no shell', () => {
   // PREVENTS: the EINVAL bug — spawning cline.cmd without a shell.
-  const shimDir = 'C:\\npm';
+  // OS-portable dirs (path.sep) so it validates the win32 branch on any host.
+  const shimDir = path.join(path.sep, 'usr', 'lib', 'npm');
   const entry = path.join(shimDir, 'node_modules', 'cline', 'bin', 'cline');
   const present = new Set([path.join(shimDir, 'cline.cmd'), entry]);
   const r = resolveExec({ platform: 'win32', env: { PATH: shimDir }, exists: (p) => present.has(p), execPath: 'NODE' });
@@ -150,7 +165,7 @@ test('resolveExec: Windows with entry found → node-direct, no shell', () => {
 });
 
 test('resolveExec: Windows with no entry → shell fallback on the cline shim', () => {
-  const r = resolveExec({ platform: 'win32', env: { PATH: 'C:\\Windows' }, exists: () => false, execPath: 'NODE' });
+  const r = resolveExec({ platform: 'win32', env: { PATH: path.join(path.sep, 'Windows') }, exists: () => false, execPath: 'NODE' });
   assert.deepEqual(r, { cmd: 'cline', prefix: [], shell: true });
 });
 
@@ -184,18 +199,28 @@ test('buildArgs: trust ALL → auto-approve true; sessionId/model/provider/timeo
   assert.deepEqual(a, ['--json', '--auto-approve', 'true', '-c', '/r', '--id', 'sid1', '-m', 'gpt-5.5', '-P', 'openai-compatible', '-t', '90']);
 });
 
+test('buildArgs: plan mode adds -p right after cwd (before resume/model flags)', () => {
+  // PREVENTS: !plan being a silent no-op for Cline — the -p flag must actually be passed.
+  assert.deepEqual(
+    buildArgs({ cwd: '/r', trustTools: 'fs_read', plan: true }),
+    ['--json', '--auto-approve', 'false', '-c', '/r', '-p']);
+  // act mode (plan falsy) omits -p entirely
+  assert.equal(buildArgs({ cwd: '/r', plan: false }).includes('-p'), false);
+});
+
 // ── adapter wiring & capabilities ──────────────────────────────────────────────
 test('cline: registered in the brain registry', () => {
   assert.ok(brains.listBrains().includes('cline'));
   assert.equal(brains.getBrain('cline').id, 'cline');
 });
 
-test('cline capabilities: resume/models yes, streaming yes, no lock, no named agents', () => {
+test('cline capabilities: resume/models yes, streaming + plan yes, no lock, no named agents', () => {
   assert.equal(capabilities.resume, true);
   assert.equal(capabilities.models, true);
   assert.equal(capabilities.agents, false);
   assert.equal(capabilities.singleWriterLock, false);
   assert.equal(capabilities.incrementalOutput, true);
+  assert.equal(capabilities.planMode, true);
 });
 
 test('cline prepareResume never blocks (no single-writer lock)', async () => {
@@ -231,6 +256,7 @@ test('runCline: success path parses output and returns NO sessionId (runner capt
   assert.equal(r.output, 'PONG');
   assert.equal(r.error, '');
   assert.equal(r.sessionId, undefined);
+  assert.equal(r.model, 'gpt-5.5'); // model surfaced for the footer
 });
 
 test('runCline: spawn failure → ok:false with a clear error, never throws', async () => {

@@ -1,4 +1,4 @@
-// core/memory/index.js — factory for the manager's persistent memory.
+// core/memory/index.js — factory for the controller's persistent memory.
 // Default backend: local append-only JSONL (zero deps, see json-store.js).
 // To add an ai-memory HTTP backend later: implement the same method surface
 // (recordSession/recordTurn/linkThread/recordDecision/get/getByThread/recent/search)

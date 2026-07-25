@@ -1,21 +1,53 @@
 # cli-controller — Architecture (single source of truth)
 
 > Read this first. Compact by design: tables over prose. Reflects code as of P4.
-> **Status:** P0 stabilize ✅ · P1 Brain abstraction ✅ · P2 Cline brain ✅ · P3 Slack channels ✅ · P4 web cockpit ✅ · Manager memory ✅ (core/memory) · P5 onboarding ⏳ · P6 public release ⏳. Roadmap detail in [`../roadmap/`](../roadmap/); memory design in [`arch_2_sequence.md`](arch_2_sequence.md).
+> **Status:** P0 stabilize ✅ · P1 Brain abstraction ✅ · P2 Cline brain ✅ · P3 Slack channels ✅ · P4 web cockpit ✅ · Controller memory ✅ (core/memory) · P5 onboarding ⏳ · P6 public release ⏳. Roadmap detail in [`../roadmap/`](../roadmap/); memory design in [`arch_2_sequence.md`](arch_2_sequence.md).
 
 ## 1. What it is
-Local, single-user control plane to drive AI coding CLIs ("**Brains**": Kiro now, Cline now, Claude Code/Codex later) from front-ends ("**Interfaces**": Slack + web now) on your own machine. No server, no DB. **Doctrine: individual-dev UX beats extensibility whenever they conflict.**
+Local, single-user control plane with **two clearly segregated sides**:
+
+- **Controller** — the interface/management agent (this is the **canonical name**; earlier docs also said *Orchestrator* / *manager*). It owns everything on *your* side of the conversation: understanding the request, routing (which brain / repo / agent / model), session binding, `!` admin control, and the persistent cross-session **memory**. The Controller is itself a headless brain call (today a fast `kiro-cli` call — `broker.js`); it never does your coding task.
+- **CLIs / Brains** — the AI coding tools the Controller drives: **Kiro** (`kiro-cli`) and **Cline** (`cline`) today; Claude Code / Codex later. A Brain does the actual coding work in a repo and knows *nothing* about Slack, the web cockpit, memory, or routing.
+
+Front-ends ("**Interfaces**": Slack + web) are how a human reaches the Controller. No server, no DB, runs on your own machine. **Doctrine: individual-dev UX beats extensibility whenever they conflict.**
 
 ```
-Interfaces ── core ── Brains          core = interface- & brain-agnostic
-Slack ─┐                ┌─ Kiro   (kiro-cli)
-Web   ─┴─► orchestrate ─┼─ Cline  (cline)
-                        └─ (Claude Code / Codex later)
+                          ┌──────── the ONE integration boundary ────────┐
+ Interfaces ──► Controller ──►  core/brain adapter  ──► Brains / CLIs
+ Slack ─┐       (routing,          (uniform contract)      ┌─ Kiro   (kiro-cli)
+ Web   ─┴─►     sessions,     ───────────────────────────► ┼─ Cline  (cline)
+                memory, !admin)                            └─ (Claude Code / Codex later)
 ```
+
+## 1.1 Controller ↔ CLIs — segregation & integration points
+
+**Hard rule: the two sides meet at exactly one seam — the brain adapter (`core/brain`).** Interfaces
+and the Controller NEVER spawn or parse a CLI directly; they go through an adapter. A Brain NEVER
+reaches back into Slack / web / memory / routing. This single seam is what lets a CLI be added or
+swapped in one file with no changes elsewhere.
+
+| | **Controller** (your side) | **CLIs / Brains** (tool side) |
+|---|---|---|
+| Role | Interpret, route, own sessions + memory, `!` admin | Do the coding task in a repo |
+| Knows about | Workspaces, brains, agents, models, aliases, threads, memory | Only its own cwd / session / prompt |
+| Code | `slack-bridge` + `web-ui` (interfaces) · `broker.js` (routing) · `core/runner.js` · `core/memory` | `core/brain/kiro.js`, `core/brain/cline.js` (adapters) + the external CLI |
+| Lifecycle | Long-running (bridge / panel processes) | Per-turn child process (spawned, then exits) |
+| State | `state.json` (thread→session) + `~/.cli-controller/memory` | Native store (`~/.kiro/sessions`, `~/.cline`) |
+
+**Integration points (the entire seam — nothing else crosses it):**
+1. **`core/brain/index.js`** — registry: `getBrain(id)` / `listBrains()` / `hasBrain(id)`. Adding a CLI = one adapter file + one registry line.
+2. **`adapter.runTurn(input) → {ok,output,error,sessionId?,…}`** — the ONE call that runs a turn on a CLI. All prompt/flag translation is *inside* the adapter (Kiro: prompt via **stdin**; Cline: prompt via **argv**).
+3. **`adapter.capabilities`** — `{resume,agents,models,images,sessionStore,singleWriterLock,incrementalOutput,planMode}`. Every CLI difference is gated on these flags, so **interfaces contain no `if (brain==='x')`.**
+4. **Session discovery / resume** — `listSessions` · `recentSessions` · `getSessionInfo` · `prepareResume` · `buildResumeCommand` · `forceUnlock`. Uniform across CLIs; per-CLI locking hides behind `prepareResume`.
+5. **`core/runner.runTurn`** — the brain-agnostic executor the web cockpit uses (resume-lock check → `runTurn` → failure-safe session capture → memory record). The Slack bridge has its own equivalent path; both reach a CLI only through the adapter.
+6. **`adapter.doctor()`** — is this CLI installed / usable (used by setup + `doctor`).
+
+> If you ever find yourself special-casing a CLI *outside* its adapter, that is the bug — push the
+> difference behind a capability flag instead. (Full method contract in §3.)
 
 ## 1.5 Layered processing model (how a message actually gets handled)
 
-Every inbound message passes through 4 layers. **Only layer 2 (Orchestrator) is conditional** — it intercepts a message *only if it's the first message of a thread* (a "direct address" to the system); everything else skips straight to layer 3.
+Every inbound message passes through 4 layers. **Only layer 2 (Controller) is conditional** — it intercepts a message *only if it's the first message of a thread* (a "direct address" to the system); everything else skips straight to layer 3.
 
 ```mermaid
 flowchart TD
@@ -27,7 +59,7 @@ flowchart TD
 
     UX --> Gate{"First message\nof this thread/session?"}
 
-    subgraph L2["Layer 2 — Orchestrator (the 'broker' / user's agent)"]
+    subgraph L2["Layer 2 — Controller (the 'broker' / user's agent)"]
         direction TB
         Broker["Intelligent orchestrator\n— a Kiro/Cline agent itself, running headless"]
         K1["Understands natural language\n('fix the SLA bug in api with opus')"]
@@ -56,14 +88,14 @@ flowchart TD
     Out --> UX
 ```
 
-**Why this split matters (the mental model):** the Orchestrator is the user's **personal agent-for-hire**, not a router bolted onto Slack. Its whole job is to let UserX skip typing "computerish" commands — it holds the knowledge (workspaces, brains, agents, models, aliases) so a plain sentence from a phone becomes a fully-specified session. It only ever touches the **first** message of a thread; once a session exists, the thread *is* the session and messages go straight to Layer 3 — the Orchestrator has nothing left to decide.
+**Why this split matters (the mental model):** the Controller is the user's **personal agent-for-hire**, not a router bolted onto Slack. Its whole job is to let UserX skip typing "computerish" commands — it holds the knowledge (workspaces, brains, agents, models, aliases) so a plain sentence from a phone becomes a fully-specified session. First-message interception is its **default** path: it decides the session, and thereafter ordinary thread messages go straight to Layer 3 — the thread *is* the session. It is not the *only* entry point, though: a live-thread `!<anything>` re-enters the Controller for an admin action (switch brain/model/agent, abort, recall…), and when the Controller asks a follow-up question (`CONTROLLER_PENDING`) the next plain reply is routed back to it rather than to the brain.
 
-The Orchestrator **is itself a headless brain call** (today: a fast Kiro-cli call — see `broker.js`), which is why it can "drive its intelligence by inferring from its knowledge base": it's the same kind of agent the user is trying to invoke, just given a different, fixed job (interpret + delegate, never do the coding task itself). This is also why adding a brain to the registry (`core/brain`) automatically makes it a candidate the Orchestrator can route *to* — the broker's prompt lists `listBrains()` live.
+The Controller **is itself a headless brain call** (today: a fast Kiro-cli call — see `broker.js`), which is why it can "drive its intelligence by inferring from its knowledge base": it's the same kind of agent the user is trying to invoke, just given a different, fixed job (interpret + delegate, never do the coding task itself). This is also why adding a brain to the registry (`core/brain`) automatically makes it a candidate the Controller can route *to* — the broker's prompt lists `listBrains()` live.
 
 | Layer | Owns | Current code | Conditional? |
 |---|---|---|---|
 | 1 UX | Human-facing transport | `slack-bridge` (Bolt), `web-ui` | always |
-| 2 Orchestrator | NL understanding → session decision (brain/cwd/agent/model), setup-vs-task | `slack-bridge/src/broker.js` (headless Kiro call) | **only on first message of a thread** |
+| 2 Controller | NL understanding → session decision (brain/cwd/agent/model), setup-vs-task | `slack-bridge/src/broker.js` (headless Kiro call) | **only on first message of a thread** |
 | 3 Session/Brain | Resume-lock check, spawn the actual brain, capture session id | `core/runner.js`, `core/brain/*` | always (every message) |
 | 4 Output | Format/chunk/react, deliver to origin UX | `format.js`, `chunk.js`, reactions/SSE | always |
 
@@ -74,7 +106,7 @@ core/                      # interface- & brain-agnostic (built-ins only, no dep
   brain/kiro.js            # Kiro low-level (spawn kiro-cli) + Brain adapter
   brain/cline.js           # Cline adapter (spawn cline --json, JSONL parse)
   runner.js                # runTurn(): brain-agnostic one-shot turn (used by web); resume-lock + failure-safe capture + memory capture
-  memory/index.js          # persistent manager memory — factory (backend-swappable; ai-memory pluggable later)
+  memory/index.js          # persistent controller memory — factory (backend-swappable; ai-memory pluggable later)
   memory/json-store.js     # default backend: zero-dep append-only JSONL + in-memory index + search; cross-process refresh
 slack-bridge/              # Slack interface (@slack/bolt Socket Mode) — thin transport
   src/index.js             # events, commands, allow-list, orchestration (runTurn), broker routing
@@ -116,8 +148,8 @@ Cline turn: `cline -c <cwd> --json --auto-approve <ALL?t:f> [--id][-m][-P][-t] <
 **Slack** (`slack-bridge`): thread = session. `state.json` key `"<channel>:<thread_ts>"` → `{cwd,agent,model,brain,verbose,sessionId,announced}`.
 - DM: any message starts/continues (as before).
 - **Channel (P3): @mention to START; thread reply to CONTINUE (no mention); allow-list still gates WHO can run.** Needs scopes `app_mentions:read,channels:history,groups:history` + bot invited (see SETUP.md). `BOT_USER_ID` from `auth.test`.
-- Plain text on a **first message** → **Orchestrator** (Layer 2, §1.5) intercepts. If the manager's memory has a strong open-session match (score ≥ `KIRO_RESUME_PROMPT_MIN_SCORE`, default 1.2), it asks **resume-vs-new** and the thread enters `MANAGER_PENDING` (the next reply is the answer, resolved by `resolvePending`); otherwise it routes `{cwd,agent,model,brain,prompt}` and starts. Replies inside a live session-thread skip the Orchestrator (Layer 3 directly).
-- **In a live thread, `!` addresses the *manager*, bare text addresses the *agent*** (control-routing model, arch_2_sequence §11): a bare reply continues the coding session; `!<known cmd>` is a deterministic fast action; `!<natural language>` is classified by `broker.routeAdmin` into an admin action (switch brain/model/agent, verbose, abort, end, clear, recent, status) — the manager can "snatch control" of a thread any time. Fast commands stay LLM-free (safety/latency); NL is the catch-all, falling back to `!help` on a miss. `!new [brain=][dir=|alias][agent=][model=][-q]`, quick aliases `!<name>`, `!recent/!teleport/!agents/!models/!help` are global.
+- Plain text on a **first message** → **Controller** (Layer 2, §1.5) intercepts. If the controller's memory has a strong open-session match (score ≥ `KIRO_RESUME_PROMPT_MIN_SCORE`, default 1.2), it asks **resume-vs-new** and the thread enters `CONTROLLER_PENDING` (the next reply is the answer, resolved by `resolvePending`); otherwise it routes `{cwd,agent,model,brain,prompt}` and starts. Replies inside a live session-thread skip the Controller (Layer 3 directly).
+- **In a live thread, `!` addresses the *controller*, bare text addresses the *agent*** (control-routing model, arch_2_sequence §11): a bare reply continues the coding session; `!<known cmd>` is a deterministic fast action; `!<natural language>` is classified by `broker.routeAdmin` into an admin action (switch brain/model/agent, verbose, abort, end, clear, recent, status) — the controller can "snatch control" of a thread any time. Fast commands stay LLM-free (safety/latency); NL is the catch-all, falling back to `!help` on a miss. `!new [brain=][dir=|alias][agent=][model=][-q]`, quick aliases `!<name>`, `!recent/!teleport/!agents/!models/!help` are global.
 
 **Web cockpit** (`web-ui`, :1234, localhost): now a peer interface that also RUNS turns.
 | API | Purpose |
@@ -139,7 +171,7 @@ SPA views: Dashboard, Sessions (brain/source filter, search, sort), **Chat** (ne
 - **Native tool session files = source of truth for transcripts** (Kiro `~/.kiro/sessions/cli/`, Cline `~/.cline`). Core never rewrites them.
 - `state.json` = derived pointer store (thread→session + prefs incl. `brain`). Survives restarts.
 - No DB. Any future SQLite index is **derived/rebuildable**, never authoritative.
-- **Manager memory** (`core/memory`, implemented): the Orchestrator's ever-persistent, cross-session index — append-only JSONL at `~/.cli-controller/memory/events.jsonl` (never deleted; `end` only marks closed), replayed into an in-memory index with token+recency search. Captured after every turn on **both** run paths (Slack `runTurn`, `core/runner`), plus a routing `decisions_log` and Slack-thread↔session linkage. Cross-process reads `refresh()` from the shared log (bridge writes, web reads). Backend is swappable — `ai-memory` (arch_2_sequence §4.6) can replace the JSONL backend behind the same method surface. Surfaced via Slack `!recall <query>` and web `GET /api/memory/{search,recent}`.
+- **Controller memory** (`core/memory`, implemented): the Controller's ever-persistent, cross-session index — append-only JSONL at `~/.cli-controller/memory/events.jsonl` (never deleted; `end` only marks closed), replayed into an in-memory index with token+recency search. Captured after every turn on **both** run paths (Slack `runTurn`, `core/runner`), plus a routing `decisions_log` and Slack-thread↔session linkage. Cross-process reads `refresh()` from the shared log (bridge writes, web reads). Backend is swappable — `ai-memory` (arch_2_sequence §4.6) can replace the JSONL backend behind the same method surface. Surfaced via Slack `!recall <query>` and web `GET /api/memory/{search,recent}`.
 
 ## 7. Hard constraints (physics — violating any is a bug)
 1. **No live content streaming for Kiro** — non-TTY block-buffers stdout & `.jsonl` (flush at turn end). "Live" = lifecycle events + elapsed only. Cline CAN stream (`--json`, `incrementalOutput:true`) — reserved via that flag. PTY was evaluated & **rejected** (native module, breaks on Node upgrades).
@@ -172,3 +204,86 @@ cd slack-bridge && npm test                         # unit tests
 - **External gates (not code bugs):** live Slack channel use needs the added scopes + `/invite @bot`; live Cline turn needs `cline auth` + corp CA.
 
 > Extended rationale & any older detail: `improvements.md` (reviewed roadmap) and `../roadmap/`. This file is the current truth; update it with every architectural change.
+
+## 12. Workspace file egress — `!file` (exact) & `!fetch` (natural language)
+
+Lets a user pull a file from the **session's workspace** (`state.json` `cwd`) into the Slack
+thread as a native, syntax-highlighted upload — either by exact path (`!file src/foo.py`) or by a
+plain-language request the Controller resolves (`!fetch me the design.md for ENG-42`).
+
+### Layering (the integration boundary is load-bearing)
+
+```mermaid
+flowchart TD
+    U["User in a thread"] -->|"!file &lt;path&gt;"| SW
+    U -->|"!&lt;nl&gt; e.g. fetch the design.md"| BR["broker.js routeAdmin<br/>classify → action:fetch, value"]
+    BR --> AA["index.js applyAdmin<br/>(thin dispatcher)"]
+    AA -->|"case 'fetch'"| HF["handleFetchAction<br/>(0 / 1 / N UX policy)"]
+    HF --> SW["sendWorkspaceFileToThread<br/>(Slack transport)"]
+
+    subgraph SlackLayer["index.js — ONLY Slack-aware file code"]
+        SW
+        HF
+    end
+
+    subgraph Pure["outfile.js — Slack-AGNOSTIC, pure, unit-tested"]
+        F["findWorkspaceFiles / parseFetchQuery<br/>(locate by name + qualifiers)"]
+        G["isBlockedSecret / resolvePath<br/>(secret refusal + cwd confinement)"]
+        R["readForUpload<br/>(stat + 2MB cap + read)"]
+        D["deliverWorkspaceFile<br/>(drives an INJECTED uploader)"]
+    end
+
+    HF --> F
+    SW --> D
+    D --> G --> R
+    D -->|"upload(filename,buf,size)"| SLACK["client.files.uploadV2"]
+```
+
+**Why this split:** `outfile.js` has **no `@slack/bolt` dependency** — the transport is *injected*.
+That keeps discovery/guards/read/deliver fully unit-testable and reusable by any interface (web
+cockpit later). The only Slack-aware file code is the two functions in `index.js`
+(`sendWorkspaceFileToThread`, `handleFetchAction`), sitting behind a documented boundary banner.
+New file logic goes in `outfile.js`; only transport + user-facing text goes in `index.js`.
+
+### `!fetch` sequence (fuzzy)
+
+```mermaid
+sequenceDiagram
+    participant U as User (Slack thread)
+    participant C as Controller (broker + applyAdmin)
+    participant O as outfile.js (pure)
+    participant S as Slack API
+    U->>C: !fetch me the design.md for ENG-42
+    C->>C: routeAdmin → action:fetch, value:"design.md ENG-42"
+    C->>O: findWorkspaceFiles(cwd, query)
+    O->>O: bounded walk (skip node_modules/dotdirs), secret filter, rank by name + qualifier
+    O-->>C: ["plans/eng-42/design.md", ...]
+    alt exactly one match
+        C->>O: deliverWorkspaceFile(cwd, relPath, upload)
+        O->>O: isBlockedSecret → resolvePath (confine) → readForUpload (≤2MB)
+        O->>S: upload(filename, buf, size)
+        S-->>U: native highlighted file in-thread
+    else zero matches
+        C-->>U: "couldn't find … try !file <exact/path>"
+    else several matches
+        C-->>U: numbered candidate list → grab one with !file <path>
+    end
+```
+
+### Security guards (both exact and fuzzy paths go through them)
+- **cwd confinement** (`resolvePath`): rejects `..` traversal, external absolutes, and the
+  prefix-sibling escape (`/proj` vs `/proj-evil`).
+- **secret refusal** (`isBlockedSecret`): `.env*`, `*.pem`, keys/keystores, `*credentials*`,
+  `.npmrc`, `.netrc`, and anything under `.ssh`/`.gnupg`/`.aws`. Applied in discovery too, so a
+  fuzzy `!fetch` can never surface a secret.
+- **size cap**: `KIRO_FILE_MAX_BYTES` (default 2 MB).
+- **bounded discovery**: `findWorkspaceFiles` caps traversal (`maxEntries`) and skips
+  `node_modules`/build dirs and dotdirs, so it can't wander the whole disk or block for long.
+
+> ⚠️ With `SLACK_ALLOWED_USER_IDS=*`, file egress is available to the whole workspace — restrict
+> the allow-list to your own user id before relying on this.
+
+### Env / tests
+- `KIRO_FILE_MAX_BYTES` (default `2097152`), `KIRO_ATTACH_TIMEOUT_MS` (inbound download timeout, 30s).
+- `npm test` (repo root `node --test`): **96** tests — includes `outfile` (guards, path confinement
+  incl. prefix-sibling, injected-uploader orchestration, `findWorkspaceFiles` ranking + secret exclusion).

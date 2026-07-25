@@ -2,10 +2,14 @@
 **/.env
 **/.env.*
 !**/.env.example
+**/.env.*
+!**/.env.example
+**/.env.backup-*
 # local agent/editor workspace config (not part of the product)
 .kiro/
 # runtime / generated
 **/state.json
+**/state.json.*
 **/macos-ca.pem
 **/bridge.log
 **/bridge.pid

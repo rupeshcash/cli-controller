@@ -13,6 +13,7 @@
 //    (EINVAL). We spawn `node <cline-entry>` directly (no shell, clean args, works on
 //    Windows + macOS + Linux). Falls back to a shell spawn only if the entry can't be found.
 //  • No single-writer lock. --json => incremental output (streaming brain).
+//  • plan/act: `-p` selects plan mode (default is act). Exposed via capabilities.planMode.
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -62,9 +63,10 @@ function spawnCline(args, { cwd } = {}) {
 }
 
 // ── Argument building ───────────────────────────────────────────────────────
-function buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs }) {
+function buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs, plan }) {
   const autoApprove = (trustTools || '').toUpperCase() === 'ALL'; // our trust → Cline auto-approve
   const args = ['--json', '--auto-approve', String(autoApprove), '-c', cwd || process.cwd()];
+  if (plan) args.push('-p'); // plan mode (default is act)
   if (sessionId) args.push('--id', sessionId);
   if (model) args.push('-m', model);
   if (provider) args.push('-P', provider);
@@ -73,7 +75,7 @@ function buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs }) {
 }
 
 // ── Output parsing (against REAL cline event shapes) ────────────────────────
-// Parse line-delimited JSON from stdout. Returns { ok, text, taskId, error, events }.
+// Parse line-delimited JSON from stdout. Returns { ok, text, taskId, error, usage, model, events }.
 // NOTE: taskId is the run's conv_* id (for reference/logging) — NOT the resume id.
 function parseJsonl(stdout) {
   const events = [];
@@ -93,7 +95,12 @@ function parseJsonl(stdout) {
   const ok = !!runResult && finish === 'completed' && !errorMsg;
   const text = (runResult && runResult.text) || doneText || '';
   const error = errorMsg || (runResult && finish && finish !== 'completed' ? `cline finished: ${finish}` : '');
-  return { ok, text, taskId: taskId || null, error, events };
+  // Usage + model (for the per-turn footer) — best-effort against observed run_result shapes.
+  const rr = runResult || {};
+  const u = rr.aggregateUsage || rr.usage || null;
+  const usage = u ? { input: u.inputTokens || 0, output: u.outputTokens || 0, cost: typeof u.totalCost === 'number' ? u.totalCost : null } : null;
+  const model = (rr.model && (rr.model.id || rr.model.model)) || (typeof rr.model === 'string' ? rr.model : null);
+  return { ok, text, taskId: taskId || null, error, usage, model, events };
 }
 
 // cline sometimes prints the JSON error event (or raw text) on stderr. Extract a message.
@@ -116,9 +123,9 @@ function cleanPrompt(p) {
 
 // ── Run one turn ─────────────────────────────────────────────────────────────
 // `_spawn` is an injectable seam for tests (defaults to the real cross-platform spawn).
-function runCline({ cwd, sessionId, model, provider, trustTools, prompt, timeoutMs = 0, onSpawn, onData }, _spawn = spawnCline) {
+function runCline({ cwd, sessionId, model, provider, trustTools, prompt, timeoutMs = 0, plan, onSpawn, onData }, _spawn = spawnCline) {
   return new Promise((resolve) => {
-    const args = buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs });
+    const args = buildArgs({ cwd, sessionId, model, provider, trustTools, timeoutMs, plan });
     args.push(prompt || ''); // positional prompt (piped stdin is not detected by cline)
     let child;
     try { child = _spawn(args, { cwd }); }
@@ -150,6 +157,8 @@ function runCline({ cwd, sessionId, model, provider, trustTools, prompt, timeout
         output: p.text,
         error: p.ok ? '' : error,
         code,
+        usage: p.usage,
+        model: p.model,
         // Deliberately NOT returning a sessionId: the run's taskId (conv_*) is not the
         // resume id. The runner captures the real history sessionId via a listSessions diff.
       });
@@ -187,7 +196,7 @@ function isInstalled() {
   return !(r.error || r.status !== 0);
 }
 
-const capabilities = { resume: true, agents: false, models: true, sessionStore: true, singleWriterLock: false, incrementalOutput: true };
+const capabilities = { resume: true, agents: false, models: true, sessionStore: true, singleWriterLock: false, incrementalOutput: true, planMode: true };
 
 const adapter = {
   id: 'cline',

@@ -251,7 +251,7 @@ app.get('/api/runs/:id/events', (req, res) => {
   req.on('close', () => clearInterval(t));
 });
 
-// ── API: Manager memory (search / recent) ────────────
+// ── API: Controller memory (search / recent) ────────────
 app.get('/api/memory/search', (req, res) => {
   try { res.json(memory().search(req.query.q || '', { limit: Math.min(parseInt(req.query.limit, 10) || 8, 25) })); }
   catch { res.json([]); }

@@ -79,13 +79,13 @@ async function route(userText, ctx, model) {
   };
 }
 
-// ── Manager admin-intent classifier ─────────────────────────────────────────
-// When a user addresses the MANAGER with "!<natural language>" (not a known fast
-// command), classify it into one administrative action. This is the manager
+// ── Controller admin-intent classifier ─────────────────────────────────────────
+// When a user addresses the CONTROLLER with "!<natural language>" (not a known fast
+// command), classify it into one administrative action. This is the controller
 // "snatching control" of a thread — NOT a task for the coding agent.
 function buildAdminPrompt(userText, ctx) {
   return [
-    'You are the MANAGER of a Slack↔coding-agent bridge. The user addressed YOU (prefix "!") to take an ADMINISTRATIVE action on their session — NOT to give the coding agent a task.',
+    'You are the CONTROLLER of a Slack↔coding-agent bridge. The user addressed YOU (prefix "!") to take an ADMINISTRATIVE action on their session — NOT to give the coding agent a task.',
     'Respond with ONLY one minified JSON object, no prose, no code fences.',
     'Shape: {"action": string, "value": string|null, "note": string}',
     'action ∈ (pick the single best fit):',
@@ -100,6 +100,7 @@ function buildAdminPrompt(userText, ctx) {
     '  "recall"   search PAST sessions/decisions from memory; value=the search query',
     '  "recent"   list recent sessions; value=count or null',
     '  "teleport" resume a specific session; value=sessionId',
+    '  "fetch"    find & deliver a FILE from the session workspace into the thread; value=the file name/description to look for (e.g. "design.md for ticket ENG-42"). Use this when the user asks to fetch/get/send/show a file, especially when they don\'t give an exact path.',
     '  "help"     show help',
     '  "none"     not an admin action we support yet; put a short reason in note',
     `Available agents: ${ctx.agentsRaw || '(main, default)'}`,

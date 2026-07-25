@@ -19,11 +19,11 @@ async function runTurn({ brain, cwd, agent, model, sessionId, prompt, trustTools
   const res = await b.runTurn({ cwd, sessionId, agent, model, trustTools, prompt, timeoutMs, onData });
   let newId = sessionId;
   if (!sessionId) newId = res.sessionId || (await captureNew(b, cwd, before)); // failure-safe (§ architecture #7)
-  rememberTurn({ sessionId: newId, brain: b.id, cwd, prompt, res }); // best-effort manager memory
+  rememberTurn({ sessionId: newId, brain: b.id, cwd, prompt, res }); // best-effort controller memory
   return { ok: res.ok, output: res.output, error: res.error, sessionId: newId, brain: b.id };
 }
 
-// Record a turn into the manager's persistent memory. Never throws.
+// Record a turn into the controller's persistent memory. Never throws.
 function rememberTurn({ sessionId, brain, cwd, prompt, res }) {
   if (!sessionId) return;
   try {

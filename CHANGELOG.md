@@ -5,10 +5,13 @@ All notable changes to this project. Format loosely follows Keep a Changelog; ve
 ## [Unreleased]
 
 ### Added
+- **Natural-language file fetch** — in a thread, `!fetch me the design.md for ENG-42` (any `!<nl>` file request) is classified by the controller into a `fetch` action that searches the session workspace (`outfile.findWorkspaceFiles` — bounded walk, skips `node_modules`/dotdirs, secret-aware, ranks ticket/qualifier matches) and delivers the file. One match → sent; several → lists candidates to grab with `!file <path>`. Shares the `sendWorkspaceFileToThread` path with `!file`.
+- **`!file <path>` — pull a workspace file into the thread** — inside a live session, `!file src/foo.py` (aliases `!cat`, `!get`) reads that path from the session's `cwd` (tracked in `state.json`) and uploads it as a native, syntax-highlighted Slack file. Confined to the session workspace (no `..`/absolute escape, incl. the prefix-sibling case) with a secret-file guard (`.env`, `*.pem`, keys, `credentials`, `.ssh/…`) and a 2MB cap (`KIRO_FILE_MAX_BYTES`). Logic lives in `slack-bridge/src/outfile.js`: pure guards + a transport-agnostic `deliverWorkspaceFile` (the uploader is injected, so it carries no Slack dependency and is fully unit-tested); `index.js` only wires the Slack transport + presentation.
+- **Terminal-resume command surfacing** — when a Slack session starts, the bridge posts a copyable command to resume that exact session in your terminal; also shown in `!status`. Built from each brain's own `buildResumeCommand` (brain-agnostic; Kiro includes `--agent`). The command only exists after the first turn creates the session id, so it posts then (open-session messages point at `!status`). Tracked Cline concurrency gap in `plans/tickets.md` (CLI-TELE-1).
 - **`cli-controller` binary** — cross-platform front door (setup / start / stop / restart / status / doctor, plus per-service `bridge`/`panel` control) with pure-Node process lifecycle (no bash, works on Windows/macOS/Linux).
 - **Natural-language onboarding wizard** (`cli-controller setup`) — detects the AI brain, walks through Slack tokens, validates via `auth.test`, sets the allow-list to just you, starts the services, and hands off to chat-driven onboarding.
-- **Manager memory** (`core/memory`) — ever-persistent, cross-session, searchable store (append-only JSONL, zero deps, cross-process). Captured on every turn; surfaced via Slack `!recall` and web `/api/memory/{search,recent}`. Backend-swappable (ai-memory pluggable later).
-- **`!` = manager** — inside a live thread, `!<natural language>` is routed to the manager and classified into an admin action (switch brain/model/agent, verbose, abort, end, clear, recall, recent); fast commands stay deterministic.
+- **Controller memory** (`core/memory`) — ever-persistent, cross-session, searchable store (append-only JSONL, zero deps, cross-process). Captured on every turn; surfaced via Slack `!recall` and web `/api/memory/{search,recent}`. Backend-swappable (ai-memory pluggable later).
+- **`!` = controller** — inside a live thread, `!<natural language>` is routed to the controller and classified into an admin action (switch brain/model/agent, verbose, abort, end, clear, recall, recent); fast commands stay deterministic.
 - **Multi-brain** — Cline added alongside Kiro behind a `core/brain` adapter contract; per-session brain selection (`!new brain=`, NL routing).
 - **Web cockpit** — brain-aware session tracking, in-browser chat (start/continue via `core/runner`), SSE run timeline, Kiro resume-lock surfacing.
 - **Slack channel support** — `@mention` to start, thread reply to continue, allow-list enforced.
@@ -16,6 +19,9 @@ All notable changes to this project. Format loosely follows Keep a Changelog; ve
 
 ### Security
 - Safe defaults: self-only allow-list, opt-in tool trust, `127.0.0.1`-only cockpit, secrets in a 0600 `.env`, stdin-fed prompts, no-shell spawns. See `SECURITY.md`.
+
+### Fixed
+- **Threads no longer forget their session** ("This thread has no session"). Two causes fixed: (1) `state.json` was written non-atomically and, on a parse error at boot, silently reset to `{}` — a crash/restart mid-write wiped *every* thread at once. Writes are now atomic (temp file + `rename`) with a `.bak` snapshot, and load falls back to the backup instead of discarding non-empty state. (2) A thread that lost its session dead-ended the user. The bridge now recovers the session from the durable append-only memory log (`threadKey → session`, which survives a `state.json` wipe); if the thread is genuinely unknown it continues as a fresh session in the same thread instead of telling the user to start over. Memory now also records the session's `agent` so recovery resumes with the right agent. Covered by `slack-bridge/test/sessions.test.js`.
 
 ## [0.1.1]
 

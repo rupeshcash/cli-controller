@@ -1,10 +1,12 @@
-# arch_2_sequence — The Orchestrator Needs a Memory
+# arch_2_sequence — The Controller Needs a Memory
 
-> Companion to `architecture.md`. That doc is the current-state truth (P0–P4). This doc is a **decision doc**: today's gap, the philosophy, and 3 concrete proposals for how the Orchestrator (Layer 2) gets **ever-persistent memory** — across sessions, brains, and interfaces, forever.
+> Companion to `architecture.md`. That doc is the current-state truth (P0–P4). This doc is a **decision doc**: today's gap, the philosophy, and 3 concrete proposals for how the Controller (Layer 2) gets **ever-persistent memory** — across sessions, brains, and interfaces, forever.
+>
+> **Terminology:** the **Controller** is the interface/management agent (canonical name — see `architecture.md §1`). In this older doc it is also called the *Orchestrator* (its Layer-2 message-routing role); the *broker* (`broker.js`) is that role's implementation. All three refer to the same Controller side of the Controller↔CLIs split.
 
 ## 1. The gap, precisely
 
-Today's Orchestrator (`broker.js`) is **stateless by design** — every call spawns a scratch Kiro session, gets a JSON decision, then **deletes that session immediately** (`chat --delete-session`). It has amnesia on purpose: it was only ever a *router*, not a *manager*.
+Today's Orchestrator (`broker.js`) is **stateless by design** — every call spawns a scratch Kiro session, gets a JSON decision, then **deletes that session immediately** (`chat --delete-session`). It has amnesia on purpose: it was only ever a *router*, not a *controller*.
 
 That's wrong for the job you're describing. Verified against code:
 ```js
@@ -23,7 +25,7 @@ Rephrased precisely, so we're aligned before proposing anything:
 3. **The Orchestrator itself runs on a brain** (Kiro headless, or Cline headless, or whatever) — but the *brain choice for the Orchestrator* is orthogonal to *the brain choice for the coding task*. You could run the Orchestrator on Kiro while it delegates coding work to Cline, or vice versa.
 4. **On ambiguity, it asks — it doesn't guess.** "Need to debug this or that" → the Orchestrator must recognize this could map to an existing open session *or* be a new task, and prompt: *"Resume the server debugging session from 2h ago, or start fresh?"* — using its memory to make that question well-informed (not a blind "new or resume?" every time).
 5. **It must handle session-scale gracefully.** Long sessions, many sessions, many repos — the Orchestrator's memory needs retrieval (search/cross-reference), not just accumulation, or it drowns in its own history.
-6. **The philosophical frame:** Slack/web is the **front desk of an agency**. You don't talk to "a coding tool" — you talk to **your manager**, who knows every worker (brain), every project (session/workspace), every open thread of work, and delegates or resumes with full context. That manager's memory is the product; the coding agents are replaceable staff.
+6. **The philosophical frame:** Slack/web is the **front desk of an agency**. You don't talk to "a coding tool" — you talk to **your controller**, who knows every worker (brain), every project (session/workspace), every open thread of work, and delegates or resumes with full context. That controller's memory is the product; the coding agents are replaceable staff.
 
 ## 3. Design constraints (carried over from `architecture.md` — non-negotiable)
 
@@ -37,9 +39,9 @@ Rephrased precisely, so we're aligned before proposing anything:
 
 Your own environment already runs a working instance of exactly this pattern — **`claude-mem`** (documented in your memBrain `feature-claude-mem` skill): a lifecycle-hook-driven capture layer that writes **observations** per tool call into SQLite, with three-tier retrieval (search → timeline → full observation) and a **profile-scoped, append-only, cross-machine sync** model. That's not a hypothetical — it's running today for your Claude Code sessions.
 
-The wider ecosystem (2026) converges on the same shape: **short-term** (live conversation, owned by the brain itself) + **mid-term** (structured facts/summaries, human-readable) + **long-term** (searchable index, often vector or FTS) — see OpenClaw's layered memory and Spring AI's `Session` (event-sourced short-term) + `AutoMemoryTools` (durable long-term) split. The universal principle: **a Memory Manager is the control point** — agents/brains never write directly into the store; a manager mediates writes (dedup, provenance, versioning) and reads (search, cross-reference).
+The wider ecosystem (2026) converges on the same shape: **short-term** (live conversation, owned by the brain itself) + **mid-term** (structured facts/summaries, human-readable) + **long-term** (searchable index, often vector or FTS) — see OpenClaw's layered memory and Spring AI's `Session` (event-sourced short-term) + `AutoMemoryTools` (durable long-term) split. The universal principle: **a Memory Manager is the control point** — agents/brains never write directly into the store; a manager mediates writes (dedup, provenance, versioning) and reads (search, cross-reference). (This is the industry term for the pattern; in cli-controller our **Controller** plays this role.)
 
-This cli-controller Orchestrator is that Memory Manager, scoped to *your* coding sessions instead of a general chat agent.
+This cli-controller Controller plays that Memory-Manager role, scoped to *your* coding sessions instead of a general chat agent.
 
 ## 4.5 Build vs. buy — surveyed the open-source landscape (widened 2026-07-11)
 
@@ -95,7 +97,7 @@ User message ──► Orchestrator session (persistent, --resume-id=ORCH_SESSIO
 
 ---
 
-### Proposal B — "Orchestrator-as-Manager-over-a-Memory-Store" (the claude-mem-inspired model — **recommended**)
+### Proposal B — "Controller-over-a-Memory-Store" (the claude-mem-inspired model — **recommended**)
 
 **Idea:** Split the Orchestrator into two things that were conflated in Proposal A:
 1. **The Orchestrator's reasoning** — still a headless brain call (Kiro/Cline/anything in the registry), but **stateless per call**, same as today.
@@ -209,7 +211,7 @@ flowchart TB
 
   GATE{"First message<br/>of the thread?"}
 
-  subgraph L2["② Orchestrator — your manager agent (headless brain call, stateless per call)"]
+  subgraph L2["② Orchestrator — your controller agent (headless brain call, stateless per call)"]
     RT["Understand intent →<br/>resume S / start new / ask / just recall"]
   end
 
@@ -314,7 +316,7 @@ sequenceDiagram
 ```
 
 ### 9.5 Story D — pure recall, no session started
-*"Search my past work" is a first-class action — the manager answers from memory without spinning up a coding agent.*
+*"Search my past work" is a first-class action — the controller answers from memory without spinning up a coding agent.*
 
 ```mermaid
 sequenceDiagram
@@ -396,7 +398,7 @@ Memory isn't "dump every message into a table." It's a **compile-not-retrieve** 
 flowchart TD
   RUN["core/runner — every turn (any brain, any interface)"]
   RUN -->|"POST /hook"| CAP["① Capture — raw observation<br/>prompt · brain · cwd · tools · result"]
-  RUN -->|"ours (core/memory)"| DL["decisions_log<br/>user ask → manager decision → outcome"]
+  RUN -->|"ours (core/memory)"| DL["decisions_log<br/>user ask → controller decision → outcome"]
   CAP --> ARCH[("raw archive — immutable")]
   CAP -->|"on session end / PreCompact / finalize"| CONS["② Consolidate<br/>observations → ONE coherent page<br/>(rule-based zero-LLM; richer if an LLM is configured)"]
   CONS --> WIKI[("③ git-versioned markdown wiki<br/>= the enriched, durable memory")]
@@ -418,15 +420,15 @@ flowchart TD
 | ⑤ Auto-improve | Background pass over finished sessions distils durable, reusable lessons ("we standardised on X"); approval-gated so it can't silently pollute. Opt-in. | scheduled | `ai-memory` |
 | ⑥ Retrieve | Consolidated *pages* (not raw logs) come back for a query — so the Orchestrator sees "the decision," not 400 chat lines. | before routing / on recall | Orchestrator, web |
 
-**Two enrichment streams, kept separate:** `ai-memory` owns the *content* memory (what happened in sessions). Our tiny `decisions_log` owns the *routing* memory (what the user asked the manager → what it decided → whether that was right). The second is what lets the manager learn "when this user says 'debug', they usually mean the server session" — a manager-specific signal no generic memory tool provides.
+**Two enrichment streams, kept separate:** `ai-memory` owns the *content* memory (what happened in sessions). Our tiny `decisions_log` owns the *routing* memory (what the user asked the controller → what it decided → whether that was right). The second is what lets the controller learn "when this user says 'debug', they usually mean the server session" — a controller-specific signal no generic memory tool provides.
 
 **Doctrine note:** enrichment is opt-in-deep. Out of the box it's zero-LLM (FTS5 + rule-based summaries) — no API key, no latency tax on the user. LLM consolidation and auto-improve are switches you flip when you want richer recall, not prerequisites.
 
 ---
 
-## 11. Control routing — who gets the message? (the `!`-to-manager model)
+## 11. Control routing — who gets the message? (the `!`-to-controller model)
 
-You spotted the real hole: "first message = manager, everything else = agent" **breaks the moment the manager asks a clarifying question**, because the user's *next* message could be (a) an answer to the manager, or (b) a task for the agent. And more broadly — a user should be able to summon the manager **any time**, even deep inside a live agent thread. Your `!`-prefix instinct is the right answer. Here's the formalized model.
+You spotted the real hole: "first message = controller, everything else = agent" **breaks the moment the controller asks a clarifying question**, because the user's *next* message could be (a) an answer to the controller, or (b) a task for the agent. And more broadly — a user should be able to summon the controller **any time**, even deep inside a live agent thread. Your `!`-prefix instinct is the right answer. Here's the formalized model.
 
 ### 11.1 Where the clarifying reply goes: **into the thread** (not DM)
 
@@ -437,45 +439,45 @@ The thread is the conversational unit. Splitting a conversation across a DM and 
 ```mermaid
 stateDiagram-v2
   [*] --> NEW : top-level message (Story §1.5 gate)
-  NEW --> MANAGER_PENDING : manager needs to ask (ambiguous)
-  NEW --> AGENT_LIVE : manager starts / resumes a session
-  MANAGER_PENDING --> MANAGER_PENDING : still clarifying
-  MANAGER_PENDING --> AGENT_LIVE : user answers → session chosen
-  AGENT_LIVE --> AGENT_LIVE : bare msg → coding agent · !NL → manager
+  NEW --> CONTROLLER_PENDING : controller needs to ask (ambiguous)
+  NEW --> AGENT_LIVE : controller starts / resumes a session
+  CONTROLLER_PENDING --> CONTROLLER_PENDING : still clarifying
+  CONTROLLER_PENDING --> AGENT_LIVE : user answers → session chosen
+  AGENT_LIVE --> AGENT_LIVE : bare msg → coding agent · !NL → controller
   AGENT_LIVE --> [*] : !end
 ```
 
-- **MANAGER_PENDING** — the manager asked something and no session exists yet. There is **no competing consumer**, so the next bare message is unambiguously the answer. (This is the clean resolution to your question: during clarification the thread is manager-owned by construction.)
+- **CONTROLLER_PENDING** — the controller asked something and no session exists yet. There is **no competing consumer**, so the next bare message is unambiguously the answer. (This is the clean resolution to your question: during clarification the thread is controller-owned by construction.)
 - **AGENT_LIVE** — a session exists. Now the split matters, and `!` is the switch.
 
-### 11.3 The `!` rule: bare = agent, `!` = manager (in natural language)
+### 11.3 The `!` rule: bare = agent, `!` = controller (in natural language)
 
 ```mermaid
 flowchart TD
   M["message in an AGENT_LIVE thread"] --> B{"starts with '!' ?"}
   B -- "no — bare text" --> AG["→ coding agent (continue the session)"]
   B -- "yes" --> K{"known fast command?"}
-  K -- "!abort !status !model !agent !end !clear ..." --> FAST["→ manager: structured action (instant)"]
-  K -- "!&lt;natural language&gt;" --> NL["→ manager LLM: interpret admin intent"]
+  K -- "!abort !status !model !agent !end !clear ..." --> FAST["→ controller: structured action (instant)"]
+  K -- "!&lt;natural language&gt;" --> NL["→ controller LLM: interpret admin intent"]
   NL --> ACT["switch brain/model · resume a different session · hand off to Cline · search memory · abort+restart elsewhere · answer from memory"]
 ```
 
-**Verdict: yes, adopt this — it's the right model, and it's a clean generalization of what already exists.** Today `!abort`, `!model`, etc. are structured manager commands. Your proposal simply says: **`!` means "address the manager," and anything after it that isn't a known command is natural language the manager interprets.** So:
+**Verdict: yes, adopt this — it's the right model, and it's a clean generalization of what already exists.** Today `!abort`, `!model`, etc. are structured controller commands. Your proposal simply says: **`!` means "address the controller," and anything after it that isn't a known command is natural language the controller interprets.** So:
 - `!abort` → instant structured action (fast path, no LLM).
-- `!switch this to cline and keep going` → manager LLM interprets → cross-brain handoff (§9.7).
-- `!what did we decide about the retry logic` → manager answers from memory (§9.5), agent untouched.
-- `!this is wrong, start over in api with opus` → manager aborts the run, opens a new session.
+- `!switch this to cline and keep going` → controller LLM interprets → cross-brain handoff (§9.7).
+- `!what did we decide about the retry logic` → controller answers from memory (§9.5), agent untouched.
+- `!this is wrong, start over in api with opus` → controller aborts the run, opens a new session.
 
 Why this is the right call:
 - **Frictionless default preserved.** Bare typing still just talks to your agent — the 95% case pays nothing.
-- **One memorable escape hatch.** `!` = "I want the manager," in plain language, from anywhere — including mid-run for control ops (abort/status/switch work concurrently with a running turn; a bare message during a run stays single-flight → "still working, use `!abort`").
-- **Backward compatible.** Existing `!commands` are just the fast-path subset of `!<manager intent>`.
-- **The manager has authority over the thread's session binding** — it can abort, re-point the thread to a different session, swap the brain, or hand off — which is exactly "snatch control anytime."
+- **One memorable escape hatch.** `!` = "I want the controller," in plain language, from anywhere — including mid-run for control ops (abort/status/switch work concurrently with a running turn; a bare message during a run stays single-flight → "still working, use `!abort`").
+- **Backward compatible.** Existing `!commands` are just the fast-path subset of `!<controller intent>`.
+- **The controller has authority over the thread's session binding** — it can abort, re-point the thread to a different session, swap the brain, or hand off — which is exactly "snatch control anytime."
 
 ### 11.4 One refinement worth adding
 For the clarifying question specifically, prefer an **explicit affordance** over free text where the interface allows it — Slack interactive buttons (`[Resume server-debug] [Start fresh]`) or a numbered reply (`1` / `2` / `new`). The state machine makes free-text answers work regardless, but buttons make it thumb-friendly on a phone and remove the last sliver of ambiguity. Treat buttons as an enhancement on top of the state machine, not a replacement for it.
 
 ### 11.5 Net rule (the whole thing in one line)
-> **Thread state decides by default; `!` overrides to the manager.** New/clarifying thread → manager. Live agent thread → bare text goes to the agent, `!<anything>` summons the manager (fast command if recognized, else natural-language admin). The manager can seize the thread's session binding at any time.
+> **Thread state decides by default; `!` overrides to the controller.** New/clarifying thread → controller. Live agent thread → bare text goes to the agent, `!<anything>` summons the controller (fast command if recognized, else natural-language admin). The controller can seize the thread's session binding at any time.
 
-This also means the §9 stories get one addition: after Story A's question, the thread sits in **MANAGER_PENDING**, so "the server one" routes to the manager as the answer — and from then on, `!` is how the user reaches the manager again without disturbing the agent.
+This also means the §9 stories get one addition: after Story A's question, the thread sits in **CONTROLLER_PENDING**, so "the server one" routes to the controller as the answer — and from then on, `!` is how the user reaches the controller again without disturbing the agent.
