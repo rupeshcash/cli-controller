@@ -204,3 +204,86 @@ cd slack-bridge && npm test                         # unit tests
 - **External gates (not code bugs):** live Slack channel use needs the added scopes + `/invite @bot`; live Cline turn needs `cline auth` + corp CA.
 
 > Extended rationale & any older detail: `improvements.md` (reviewed roadmap) and `../roadmap/`. This file is the current truth; update it with every architectural change.
+
+## 12. Workspace file egress — `!file` (exact) & `!fetch` (natural language)
+
+Lets a user pull a file from the **session's workspace** (`state.json` `cwd`) into the Slack
+thread as a native, syntax-highlighted upload — either by exact path (`!file src/foo.py`) or by a
+plain-language request the Controller resolves (`!fetch me the design.md for ENG-42`).
+
+### Layering (the integration boundary is load-bearing)
+
+```mermaid
+flowchart TD
+    U["User in a thread"] -->|"!file &lt;path&gt;"| SW
+    U -->|"!&lt;nl&gt; e.g. fetch the design.md"| BR["broker.js routeAdmin<br/>classify → action:fetch, value"]
+    BR --> AA["index.js applyAdmin<br/>(thin dispatcher)"]
+    AA -->|"case 'fetch'"| HF["handleFetchAction<br/>(0 / 1 / N UX policy)"]
+    HF --> SW["sendWorkspaceFileToThread<br/>(Slack transport)"]
+
+    subgraph SlackLayer["index.js — ONLY Slack-aware file code"]
+        SW
+        HF
+    end
+
+    subgraph Pure["outfile.js — Slack-AGNOSTIC, pure, unit-tested"]
+        F["findWorkspaceFiles / parseFetchQuery<br/>(locate by name + qualifiers)"]
+        G["isBlockedSecret / resolvePath<br/>(secret refusal + cwd confinement)"]
+        R["readForUpload<br/>(stat + 2MB cap + read)"]
+        D["deliverWorkspaceFile<br/>(drives an INJECTED uploader)"]
+    end
+
+    HF --> F
+    SW --> D
+    D --> G --> R
+    D -->|"upload(filename,buf,size)"| SLACK["client.files.uploadV2"]
+```
+
+**Why this split:** `outfile.js` has **no `@slack/bolt` dependency** — the transport is *injected*.
+That keeps discovery/guards/read/deliver fully unit-testable and reusable by any interface (web
+cockpit later). The only Slack-aware file code is the two functions in `index.js`
+(`sendWorkspaceFileToThread`, `handleFetchAction`), sitting behind a documented boundary banner.
+New file logic goes in `outfile.js`; only transport + user-facing text goes in `index.js`.
+
+### `!fetch` sequence (fuzzy)
+
+```mermaid
+sequenceDiagram
+    participant U as User (Slack thread)
+    participant C as Controller (broker + applyAdmin)
+    participant O as outfile.js (pure)
+    participant S as Slack API
+    U->>C: !fetch me the design.md for ENG-42
+    C->>C: routeAdmin → action:fetch, value:"design.md ENG-42"
+    C->>O: findWorkspaceFiles(cwd, query)
+    O->>O: bounded walk (skip node_modules/dotdirs), secret filter, rank by name + qualifier
+    O-->>C: ["plans/eng-42/design.md", ...]
+    alt exactly one match
+        C->>O: deliverWorkspaceFile(cwd, relPath, upload)
+        O->>O: isBlockedSecret → resolvePath (confine) → readForUpload (≤2MB)
+        O->>S: upload(filename, buf, size)
+        S-->>U: native highlighted file in-thread
+    else zero matches
+        C-->>U: "couldn't find … try !file <exact/path>"
+    else several matches
+        C-->>U: numbered candidate list → grab one with !file <path>
+    end
+```
+
+### Security guards (both exact and fuzzy paths go through them)
+- **cwd confinement** (`resolvePath`): rejects `..` traversal, external absolutes, and the
+  prefix-sibling escape (`/proj` vs `/proj-evil`).
+- **secret refusal** (`isBlockedSecret`): `.env*`, `*.pem`, keys/keystores, `*credentials*`,
+  `.npmrc`, `.netrc`, and anything under `.ssh`/`.gnupg`/`.aws`. Applied in discovery too, so a
+  fuzzy `!fetch` can never surface a secret.
+- **size cap**: `KIRO_FILE_MAX_BYTES` (default 2 MB).
+- **bounded discovery**: `findWorkspaceFiles` caps traversal (`maxEntries`) and skips
+  `node_modules`/build dirs and dotdirs, so it can't wander the whole disk or block for long.
+
+> ⚠️ With `SLACK_ALLOWED_USER_IDS=*`, file egress is available to the whole workspace — restrict
+> the allow-list to your own user id before relying on this.
+
+### Env / tests
+- `KIRO_FILE_MAX_BYTES` (default `2097152`), `KIRO_ATTACH_TIMEOUT_MS` (inbound download timeout, 30s).
+- `npm test` (repo root `node --test`): **96** tests — includes `outfile` (guards, path confinement
+  incl. prefix-sibling, injected-uploader orchestration, `findWorkspaceFiles` ranking + secret exclusion).
